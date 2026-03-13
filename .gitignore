@@ -1,0 +1,30 @@
+# Node modules
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+electron-app/dist-electron/
+
+# Executables / packages
+*.exe
+*.dll
+*.pkg
+*.app
+
+# Logs
+npm-debug.log*
+yarn-error.log*
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
