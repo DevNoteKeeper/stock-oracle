@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "src/electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "electron:dev": "concurrently \"cross-env NODE_ENV=development electron .\" \"vite\"",
     "build": "tsc -b && vite build",
+    "electron:build": "tsc -b && vite build && electron-builder",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -38,5 +41,16 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^8.0.0",
     "wait-on": "^9.0.4"
+  },
+  "build": {
+    "appId": "com.stockpredictor.app",
+    "productName": "주식 예측 분석기",
+    "files": [
+      "dist/**/*",
+      "src/electron/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    }
   }
 }
