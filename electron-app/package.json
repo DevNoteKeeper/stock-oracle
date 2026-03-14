@@ -1,7 +1,7 @@
 {
   "name": "electron-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "main": "src/electron/main.cjs",
   "scripts": {
@@ -55,7 +55,7 @@
     ],
     "extraResources": [
       {
-        "from": "../python-backend/dist/backend.exe",
+        "from": "backend/backend.exe",
         "to": "backend/backend.exe"
       }
     ],
