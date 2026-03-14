@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import StockInput from "./components/StockInput";
+import type { PositionInfo } from "./components/StockInput";
 import AnalysisResult from "./components/AnalysisResult";
 import PredictionHistory from "./components/PredictionHistory";
 
@@ -159,6 +160,16 @@ export interface StockData {
     recent_history?: PredictionEntry[];
     all_history?: PredictionEntry[];
   };
+  position?: {
+    quantity: number;
+    avg_price: number;
+    total_invested: number;
+    current_value: number;
+    profit_loss: number;
+    profit_loss_pct: number;
+    target_profit_pct?: number;
+    target_price?: number;
+  };
 }
 
 export interface PredictionEntry {
@@ -269,7 +280,7 @@ export default function App() {
     check();
   }, []);
 
-  const handleAnalyze = async (ticker: string, companyName: string, country: string) => {
+  const handleAnalyze = async (ticker: string, companyName: string, country: string, position?: PositionInfo) => {
     setAppState("analyzing");
     setStockData(null);
     setAnalysisText("");
@@ -279,7 +290,7 @@ export default function App() {
       const response = await fetch(`${API_BASE}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker, company_name: companyName, country }),
+        body: JSON.stringify({ ticker, company_name: companyName, country, position }),
       });
 
       if (!response.ok) {

@@ -68,6 +68,7 @@ export default function AnalysisResult({ stockData, analysisText, isLoading }: P
   const indicators = stockData?.market_indicators;
   const investor = stockData?.investor_trading;
   const news = stockData?.news;
+  const position = stockData?.position;
 
   // 분석 텍스트 업데이트 시 스크롤
   useEffect(() => {
@@ -145,6 +146,134 @@ export default function AnalysisResult({ stockData, analysisText, isLoading }: P
               </div>
             </div>
           </Panel>
+
+          {/* ── 보유 포지션 카드 ── */}
+          {position && (() => {
+            const pl     = position.profit_loss;
+            const plPct  = position.profit_loss_pct;
+            const isUp   = pl >= 0;
+            const plColor = isUp ? "var(--green)" : "var(--red)";
+            const plBg    = isUp ? "rgba(52,211,153,0.08)" : "rgba(248,113,113,0.08)";
+            const plBorder = isUp ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)";
+
+            // 목표가까지 남은 %
+            const toTarget = position.target_price
+              ? round((position.target_price - (stock?.current_price ?? 0)) / (stock?.current_price ?? 1) * 100, 2)
+              : null;
+
+            // 진행 바 (평균매수가 ~ 현재가 ~ 목표가)
+            const avg = position.avg_price;
+            const cur = stock?.current_price ?? avg;
+            const tgt = position.target_price ?? cur * 1.2;
+            const barMin = Math.min(avg, cur) * 0.97;
+            const barMax = Math.max(tgt, cur) * 1.03;
+            const avgPct  = ((avg - barMin) / (barMax - barMin)) * 100;
+            const curPct  = ((cur - barMin) / (barMax - barMin)) * 100;
+            const tgtPct  = ((tgt - barMin) / (barMax - barMin)) * 100;
+
+            function round(n: number, d: number) {
+              return Math.round(n * Math.pow(10, d)) / Math.pow(10, d);
+            }
+
+            return (
+              <Panel>
+                {/* 헤더 */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg flex items-center justify-center text-sm"
+                      style={{ background: "linear-gradient(135deg,#6366f1,#8b5cf6)" }}>
+                      💼
+                    </div>
+                    <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>내 보유 포지션</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
+                    style={{ background: plBg, color: plColor, border: `1px solid ${plBorder}` }}>
+                    {isUp ? "▲" : "▼"} {isUp ? "+" : ""}{plPct.toFixed(2)}%
+                  </div>
+                </div>
+
+                {/* 핵심 수치 4개 */}
+                <div className="grid grid-cols-4 gap-2 mb-4">
+                  {[
+                    { label: "보유 수량",   value: `${position.quantity.toLocaleString()}주`,             color: "var(--text-primary)" },
+                    { label: "평균 매수가", value: `${position.avg_price.toLocaleString()}원`,            color: "var(--text-primary)" },
+                    { label: "총 투자금",   value: `${(position.total_invested / 10000).toFixed(0)}만원`, color: "var(--text-secondary)" },
+                    { label: "현재 평가액", value: `${(position.current_value / 10000).toFixed(0)}만원`,  color: isUp ? "var(--green)" : "var(--red)" },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="rounded-xl p-3 text-center"
+                      style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                      <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>{label}</p>
+                      <p className="text-sm font-semibold num" style={{ color }}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 평가 손익 강조 */}
+                <div className="rounded-xl p-3 mb-4 flex items-center justify-between"
+                  style={{ background: plBg, border: `1px solid ${plBorder}` }}>
+                  <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>평가 손익</span>
+                  <div className="text-right">
+                    <span className="text-xl font-bold num" style={{ color: plColor }}>
+                      {isUp ? "+" : ""}{pl.toLocaleString()}원
+                    </span>
+                    <span className="text-sm font-semibold num ml-2" style={{ color: plColor }}>
+                      ({isUp ? "+" : ""}{plPct.toFixed(2)}%)
+                    </span>
+                  </div>
+                </div>
+
+                {/* 가격 진행 바 */}
+                <div className="mb-2">
+                  <div className="relative h-2 rounded-full mb-2" style={{ background: "var(--border)" }}>
+                    {/* 수익 구간 채우기 */}
+                    <div className="absolute top-0 bottom-0 rounded-full"
+                      style={{
+                        left: `${Math.min(avgPct, curPct)}%`,
+                        width: `${Math.abs(curPct - avgPct)}%`,
+                        background: isUp ? "rgba(52,211,153,0.4)" : "rgba(248,113,113,0.4)",
+                      }} />
+                    {/* 평균매수가 마커 */}
+                    <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white"
+                      style={{ left: `${avgPct}%`, transform: "translate(-50%,-50%)", background: "var(--text-muted)", zIndex: 2 }} />
+                    {/* 현재가 마커 */}
+                    <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white"
+                      style={{ left: `${curPct}%`, transform: "translate(-50%,-50%)", background: plColor, zIndex: 3,
+                        boxShadow: `0 0 8px ${plColor}` }} />
+                    {/* 목표가 마커 */}
+                    {position.target_price && (
+                      <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2"
+                        style={{ left: `${tgtPct}%`, transform: "translate(-50%,-50%)", background: "var(--gold)",
+                          borderColor: "var(--gold)", zIndex: 2 }} />
+                    )}
+                  </div>
+                  <div className="flex justify-between text-xs num" style={{ color: "var(--text-muted)" }}>
+                    <span>매수 {position.avg_price.toLocaleString()}</span>
+                    <span style={{ color: plColor, fontWeight: 600 }}>현재 {(stock?.current_price ?? 0).toLocaleString()}</span>
+                    {position.target_price && (
+                      <span style={{ color: "var(--gold)" }}>목표 {position.target_price.toLocaleString()}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 목표가까지 거리 */}
+                {toTarget !== null && (
+                  <div className="mt-3 rounded-lg px-3 py-2 flex items-center justify-between"
+                    style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
+                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>목표 수익률 달성까지</span>
+                    <span className="text-sm font-bold num" style={{ color: "var(--gold)" }}>
+                      {toTarget > 0 ? `+${toTarget.toFixed(2)}% 필요` : "목표 달성! 익절 검토"}
+                    </span>
+                  </div>
+                )}
+
+                {/* AI 포지션 분석 안내 */}
+                <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                  <span style={{ color: "#a78bfa" }}>💡</span>
+                  아래 AI 분석 <span style={{ color: "#a78bfa", fontWeight: 600 }}>§ 11. 보유 포지션 전략</span>에서 익절·추가매수·손절 구체적 조언을 확인하세요
+                </div>
+              </Panel>
+            );
+          })()}
 
           {/* ── 주가 차트 (볼린저밴드 + MA 포함) ── */}
           {(() => {
@@ -790,21 +919,25 @@ export default function AnalysisResult({ stockData, analysisText, isLoading }: P
                       const isTiming   = num === 9  || text.includes("타이밍");
                       const isSignal   = num === 10 || text.includes("신뢰도");
                       const isNews     = num === 2  || text.includes("뉴스");
+                      const isPosition = num === 11 || text.includes("포지션");
 
-                      const accentColor = isPredict ? "var(--accent)"
+                      const accentColor = isPredict  ? "var(--accent)"
                         : isTiming   ? "#a78bfa"
                         : isSignal   ? "var(--gold)"
                         : isNews     ? "#34d399"
+                        : isPosition ? "#f472b6"
                         : "var(--text-secondary)";
-                      const bgColor = isPredict ? "var(--accent-dim)"
+                      const bgColor = isPredict  ? "var(--accent-dim)"
                         : isTiming   ? "rgba(167,139,250,0.12)"
                         : isSignal   ? "rgba(251,191,36,0.12)"
                         : isNews     ? "rgba(52,211,153,0.12)"
+                        : isPosition ? "rgba(244,114,182,0.12)"
                         : "var(--bg-panel)";
-                      const borderColor = isPredict ? "rgba(56,189,248,0.3)"
+                      const borderColor = isPredict  ? "rgba(56,189,248,0.3)"
                         : isTiming   ? "rgba(167,139,250,0.25)"
                         : isSignal   ? "rgba(251,191,36,0.2)"
                         : isNews     ? "rgba(52,211,153,0.2)"
+                        : isPosition ? "rgba(244,114,182,0.25)"
                         : "var(--border)";
 
                       return (

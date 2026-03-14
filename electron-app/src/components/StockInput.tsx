@@ -2,8 +2,14 @@ import { useState } from "react";
 import { Search, TrendingUp, Globe, Zap } from "lucide-react";
 
 interface Props {
-  onAnalyze: (ticker: string, companyName: string, country: string) => void;
+  onAnalyze: (ticker: string, companyName: string, country: string, position?: PositionInfo) => void;
   backendOk: boolean;
+}
+
+export interface PositionInfo {
+  quantity: number;
+  avgPrice: number;
+  targetProfitPct?: number;  // 목표 수익률 (선택)
 }
 
 const PRESETS: Record<string, { ticker: string; name: string; desc: string }[]> = {
@@ -171,6 +177,12 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
   const [ticker, setTicker] = useState("");
   const [companyName, setCompanyName] = useState("");
 
+  // 보유 포지션
+  const [hasPosition, setHasPosition] = useState(false);
+  const [quantity, setQuantity] = useState("");
+  const [avgPrice, setAvgPrice] = useState("");
+  const [targetPct, setTargetPct] = useState("");
+
   const handlePreset = (t: string, n: string) => {
     setTicker(t);
     setCompanyName(n);
@@ -187,7 +199,12 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onAnalyze(ticker.trim().toUpperCase(), companyName.trim(), country);
+    const position = hasPosition && quantity && avgPrice ? {
+      quantity: parseFloat(quantity),
+      avgPrice: parseFloat(avgPrice),
+      targetProfitPct: targetPct ? parseFloat(targetPct) : undefined,
+    } : undefined;
+    onAnalyze(ticker.trim().toUpperCase(), companyName.trim(), country, position);
   };
 
   return (
@@ -329,6 +346,103 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
               {item}
             </div>
           ))}
+        </div>
+
+        {/* 보유 포지션 입력 */}
+        <div className="rounded-2xl overflow-hidden mb-3" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
+          {/* 토글 헤더 */}
+          <button
+            type="button"
+            onClick={() => setHasPosition(!hasPosition)}
+            className="w-full flex items-center justify-between px-4 py-3 transition-all"
+            style={{ background: hasPosition ? "rgba(56,189,248,0.06)" : "transparent" }}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-5 h-5 rounded flex items-center justify-center text-xs"
+                style={{ background: hasPosition ? "var(--accent-dim)" : "var(--bg-panel)", border: `1px solid ${hasPosition ? "rgba(56,189,248,0.4)" : "var(--border)"}` }}>
+                💼
+              </div>
+              <span className="text-sm font-medium" style={{ color: hasPosition ? "var(--accent)" : "var(--text-secondary)" }}>
+                이 주식 보유 중이에요
+              </span>
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                (익절·추가매수 타이밍 조언)
+              </span>
+            </div>
+            <div className="w-8 h-4 rounded-full transition-all relative flex-shrink-0"
+              style={{ background: hasPosition ? "var(--accent)" : "var(--border)" }}>
+              <div className="w-3 h-3 rounded-full bg-white absolute top-0.5 transition-all"
+                style={{ left: hasPosition ? "17px" : "2px" }} />
+            </div>
+          </button>
+
+          {/* 입력 필드 */}
+          {hasPosition && (
+            <div className="px-4 pb-4 pt-1">
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                {/* 보유 수량 */}
+                <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                  <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>보유 수량</p>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      placeholder="100"
+                      min="1"
+                      className="w-full bg-transparent text-sm font-semibold outline-none num"
+                      style={{ color: "var(--text-primary)" }}
+                    />
+                    <span className="text-xs flex-shrink-0" style={{ color: "var(--text-muted)" }}>주</span>
+                  </div>
+                </div>
+
+                {/* 평균 매수가 */}
+                <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                  <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>평균 매수가</p>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={avgPrice}
+                      onChange={(e) => setAvgPrice(e.target.value)}
+                      placeholder="70000"
+                      min="1"
+                      className="w-full bg-transparent text-sm font-semibold outline-none num"
+                      style={{ color: "var(--text-primary)" }}
+                    />
+                    <span className="text-xs flex-shrink-0" style={{ color: "var(--text-muted)" }}>원</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 총 투자금액 자동 계산 */}
+              {quantity && avgPrice && (
+                <div className="flex items-center justify-between px-3 py-2 rounded-lg mb-2"
+                  style={{ background: "rgba(56,189,248,0.06)", border: "1px solid rgba(56,189,248,0.12)" }}>
+                  <span className="text-xs" style={{ color: "var(--text-muted)" }}>총 투자금액</span>
+                  <span className="text-xs font-semibold num" style={{ color: "var(--accent)" }}>
+                    {(parseFloat(quantity) * parseFloat(avgPrice)).toLocaleString()}원
+                  </span>
+                </div>
+              )}
+
+              {/* 목표 수익률 (선택) */}
+              <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>목표 수익률 <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(선택 — 없으면 AI가 판단)</span></p>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={targetPct}
+                    onChange={(e) => setTargetPct(e.target.value)}
+                    placeholder="20"
+                    className="w-full bg-transparent text-sm font-semibold outline-none num"
+                    style={{ color: "var(--text-primary)" }}
+                  />
+                  <span className="text-xs flex-shrink-0" style={{ color: "var(--text-muted)" }}>%</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 분석 시작 버튼 */}
