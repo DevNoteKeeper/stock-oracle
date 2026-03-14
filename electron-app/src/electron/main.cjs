@@ -1,246 +1,420 @@
-"use strict";
-
-const { app, BrowserWindow, shell, ipcMain, dialog } = require("electron");
-const path  = require("path");
-const http  = require("http");
-const https = require("https");
+const { app, BrowserWindow, shell, ipcMain } = require("electron");
+const path = require("path");
 const { spawn } = require("child_process");
+const http = require("http");
 
-let mainWindow  = null;
-let ollamaWin   = null;
-let backendProc = null;
+let mainWindow;
+let ollamaWindow;
+let pythonProcess;
 
-const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
-const MODEL = "qwen2.5:14b";
+const isDev = process.env.NODE_ENV === "development";
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function httpGet(url) {
+// ── Ollama 실행 여부 확인 ─────────────────────────────────────────
+function checkOllama() {
   return new Promise((resolve) => {
-    const mod = url.startsWith("https") ? https : http;
-    const req = mod.get(url, { timeout: 3000 }, (res) => {
-      let body = "";
-      res.on("data", (d) => (body += d));
-      res.on("end", () => resolve({ ok: res.statusCode < 400, status: res.statusCode, body }));
+    const req = http.get("http://localhost:11434", (res) => {
+      resolve(res.statusCode < 500);
     });
-    req.on("error",   () => resolve({ ok: false }));
-    req.on("timeout", () => { req.destroy(); resolve({ ok: false }); });
+    req.on("error", () => resolve(false));
+    req.setTimeout(3000, () => {
+      req.destroy();
+      resolve(false);
+    });
   });
 }
 
-async function checkOllama() {
-  const res = await httpGet("http://localhost:11434");
-  return res.ok;
-}
-
-async function checkModel() {
-  const res = await httpGet("http://localhost:11434/api/tags");
-  if (!res.ok) return false;
-  try {
-    const data   = JSON.parse(res.body);
-    const models = (data.models || []).map((m) => m.name);
-    return models.some((m) => m.startsWith(MODEL.split(":")[0]));
-  } catch { return false; }
-}
-
-async function getOllamaStatus() {
-  const running = await checkOllama();
-  if (!running) return "not_installed";
-  const hasModel = await checkModel();
-  return hasModel ? "ok" : "no_model";
-}
-
-function createOllamaWindow(reason) {
-  if (ollamaWin && !ollamaWin.isDestroyed()) { ollamaWin.focus(); return; }
-
-  ollamaWin = new BrowserWindow({
-    width: 540, height: 600,
-    resizable: false, minimizable: false, maximizable: false,
+// ── Ollama 안내 팝업 ─────────────────────────────────────────────
+function createOllamaGuideWindow() {
+  ollamaWindow = new BrowserWindow({
+    width: 560,
+    height: 640,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
     alwaysOnTop: true,
-    parent: mainWindow ?? undefined,
+    titleBarStyle: "hidden",
+    backgroundColor: "#0c1428",
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
-    titleBarStyle: "hidden",
-    backgroundColor: "#0c1428",
     show: false,
-    title: "StockOracle — Ollama 안내",
   });
 
-  ollamaWin.loadURL(
-    "data:text/html;charset=utf-8," + encodeURIComponent(buildOllamaHTML(reason))
+  ollamaWindow.loadURL(
+    `data:text/html;charset=utf-8,${encodeURIComponent(OLLAMA_GUIDE_HTML)}`,
   );
-  ollamaWin.once("ready-to-show", () => ollamaWin.show());
-  ollamaWin.on("closed", () => { ollamaWin = null; });
-  ollamaWin.webContents.setWindowOpenHandler(({ url }) => {
+
+  ollamaWindow.once("ready-to-show", () => ollamaWindow.show());
+
+  // 재확인
+  ipcMain.removeAllListeners("ollama-retry");
+  ipcMain.on("ollama-retry", async () => {
+    const ok = await checkOllama();
+    if (ok) {
+      ollamaWindow?.close();
+      ollamaWindow = null;
+      startPythonServer();
+      createMainWindow();
+    } else {
+      ollamaWindow?.webContents.send("ollama-still-missing");
+    }
+  });
+
+  // AI 없이 그냥 시작
+  ipcMain.removeAllListeners("ollama-skip");
+  ipcMain.on("ollama-skip", () => {
+    ollamaWindow?.close();
+    ollamaWindow = null;
+    createMainWindow();
+  });
+
+  // 다운로드 링크 열기
+  ipcMain.removeAllListeners("ollama-download");
+  ipcMain.on("ollama-download", () => {
+    shell.openExternal("https://ollama.com/download");
+  });
+
+  // 앱 종료
+  ipcMain.removeAllListeners("ollama-close");
+  ipcMain.on("ollama-close", () => app.quit());
+}
+
+// ── 메인 앱 창 ───────────────────────────────────────────────────
+function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.cjs"),
+    },
+    titleBarStyle: "hiddenInset",
+    backgroundColor: "#030712",
+    show: false,
+  });
+
+  if (isDev) {
+    mainWindow.loadURL("http://localhost:5173");
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "../../dist/index.html"));
+  }
+
+  mainWindow.once("ready-to-show", () => mainWindow.show());
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
   });
 }
 
-function buildOllamaHTML(reason) {
-  const noModel = reason === "no_model";
-  const title   = noModel ? "AI 모델이 없어요" : "Ollama가 설치되지 않았어요";
-  const emoji   = noModel ? "🤖" : "📦";
-  const desc    = noModel
-    ? `Ollama는 실행 중이지만 <b>${MODEL}</b> 모델이 없어요.<br>아래 명령어로 모델을 받아주세요. (약 9 GB)`
-    : `StockOracle의 AI 분석은 <b>Ollama</b>가 필요해요.<br>Ollama는 AI를 내 컴퓨터에서 실행하는 무료 도구입니다.`;
-  const steps = noModel
-    ? ["터미널(cmd / PowerShell)을 열어주세요", "아래 명령어를 붙여넣고 실행하세요", "다운로드 완료 후 <b>[다시 확인]</b>을 눌러주세요"]
-    : ["아래 버튼으로 <b>공식 사이트</b>에서 설치 파일을 받으세요", "설치 완료 후 터미널에서 AI 모델을 다운받으세요", "완료 후 <b>[다시 확인]</b>을 눌러주세요"];
-  const command = noModel
-    ? `ollama pull ${MODEL}`
-    : `# Ollama 설치 후:\nollama pull ${MODEL}`;
-
-  return `<!DOCTYPE html>
-<html lang="ko"><head><meta charset="UTF-8">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0c1428;--b:#1a2a4a;--accent:#38bdf8;--green:#34d399;--yellow:#fbbf24;--red:#f87171;--text:#e2e8f0;--muted:#64748b}
-body{font-family:-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;-webkit-user-select:none}
-.tb{height:36px;background:#080f1e;border-bottom:1px solid var(--b);display:flex;align-items:center;padding:0 14px;-webkit-app-region:drag;flex-shrink:0}
-.tb span{font-size:12px;color:var(--muted);-webkit-app-region:no-drag}
-.cl{margin-left:auto;width:14px;height:14px;border-radius:50%;background:#ff5f57;border:none;cursor:pointer;-webkit-app-region:no-drag;transition:filter .15s}
-.cl:hover{filter:brightness(1.3)}
-.wrap{flex:1;overflow-y:auto;padding:24px 28px 20px;display:flex;flex-direction:column;gap:18px}
-.hd{text-align:center}
-.hd .ic{font-size:48px;margin-bottom:10px}
-.hd h1{font-size:18px;font-weight:700;color:#f1f5f9;margin-bottom:8px}
-.hd p{font-size:13px;color:var(--muted);line-height:1.7}
-.hd p b{color:var(--accent)}
-.steps{display:flex;flex-direction:column;gap:10px}
-.step{display:flex;gap:12px;align-items:flex-start}
-.sn{width:24px;height:24px;border-radius:50%;flex-shrink:0;background:linear-gradient(135deg,var(--accent),#0284c7);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}
-.st{font-size:13px;color:#cbd5e1;line-height:1.6;padding-top:3px}
-.st b{color:var(--text)}
-.dl-btn{display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;font-size:14px;font-weight:600;border:none;border-radius:10px;padding:13px;cursor:pointer;transition:filter .15s,transform .1s}
-.dl-btn:hover{filter:brightness(1.12);transform:translateY(-1px)}
-.cmd{background:#060d1a;border:1px solid var(--b);border-radius:10px;padding:14px 16px;position:relative}
-.cmd pre{font-family:"JetBrains Mono","Consolas",monospace;font-size:13px;color:var(--accent);white-space:pre-wrap;line-height:1.7}
-.cp{position:absolute;top:10px;right:10px;background:var(--b);border:none;border-radius:6px;color:var(--muted);font-size:11px;padding:4px 10px;cursor:pointer;transition:background .15s,color .15s}
-.cp:hover{background:var(--accent);color:#fff}
-.actions{display:flex;gap:10px}
-.btn-ok{flex:1;padding:12px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-size:13px;font-weight:600;border:none;border-radius:10px;cursor:pointer;transition:filter .15s,transform .1s}
-.btn-ok:hover{filter:brightness(1.1);transform:translateY(-1px)}
-.btn-sk{padding:12px 18px;background:transparent;color:var(--muted);font-size:13px;border:1px solid var(--b);border-radius:10px;cursor:pointer;transition:color .15s,border-color .15s}
-.btn-sk:hover{color:var(--text);border-color:#334155}
-.msg{display:none;text-align:center;font-size:12px;padding:9px 12px;border-radius:8px}
-.msg.busy{display:block;color:var(--yellow);background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2)}
-.msg.ok  {display:block;color:var(--green); background:rgba(52,211,153,.08); border:1px solid rgba(52,211,153,.2)}
-.msg.fail{display:block;color:var(--red);   background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.2)}
-.note{font-size:11px;color:var(--muted);text-align:center;line-height:1.6}
-</style></head><body>
-<div class="tb">
-  <span>StockOracle — Ollama 설치 안내</span>
-  <button class="cl" onclick="window.close()"></button>
-</div>
-<div class="wrap">
-  <div class="hd">
-    <div class="ic">${emoji}</div>
-    <h1>${title}</h1>
-    <p>${desc}</p>
-  </div>
-  <div class="steps">
-    ${"$"}{steps.map((s,i)=>`<div class="step"><div class="sn">${"$"}{i+1}</div><div class="st">${"$"}{s}</div></div>`).join("")}
-  </div>
-  ${"$"}{!noModel?`<button class="dl-btn" id="dlBtn">⬇&nbsp; ollama.com 에서 다운로드</button>`:""}
-  <div class="cmd">
-    <pre id="ct">${command}</pre>
-    <button class="cp" onclick="cp()">복사</button>
-  </div>
-  <div class="actions">
-    <button class="btn-ok" onclick="retry()">🔄 다시 확인</button>
-    <button class="btn-sk" onclick="window.close()">건너뛰기</button>
-  </div>
-  <div class="msg" id="msg"></div>
-  <p class="note">Ollama는 AI를 내 PC에서만 실행해요 — 데이터가 외부로 전송되지 않습니다.</p>
-</div>
-<script>
-  document.getElementById("dlBtn")?.addEventListener("click",()=>{
-    window.electronAPI?.openExternal?.("https://ollama.com/download/windows")
-    ?? window.open("https://ollama.com/download/windows","_blank");
-  });
-  function cp(){
-    navigator.clipboard.writeText(document.getElementById("ct").textContent.trim());
-    const b=document.querySelector(".cp");
-    b.textContent="✓ 복사됨";setTimeout(()=>b.textContent="복사",1800);
-  }
-  async function retry(){
-    const m=document.getElementById("msg");
-    m.className="msg busy";m.textContent="⏳ Ollama 확인 중...";
-    let r;
-    if(window.electronAPI?.retryOllamaCheck){r=await window.electronAPI.retryOllamaCheck();}
-    else{try{const res=await fetch("http://localhost:11434",{signal:AbortSignal.timeout(2500)});r=res.ok?"ok":"not_installed";}catch{r="not_installed";}}
-    if(r==="ok"){m.className="msg ok";m.textContent="✅ 준비 완료! 잠시 후 창이 닫힙니다.";setTimeout(()=>window.close(),1400);}
-    else if(r==="no_model"){m.className="msg fail";m.textContent="⚠️  Ollama는 있지만 모델이 없어요. 위 명령어를 실행해주세요.";}
-    else{m.className="msg fail";m.textContent="❌ 아직 감지되지 않아요. 설치 후 Ollama를 먼저 실행해주세요.";}
-  }
-</script>
-</body></html>`;
-}
-
-function startBackend() {
+// ── Python 백엔드 시작 ────────────────────────────────────────────
+function startPythonServer() {
   if (isDev) return;
-  const exe = path.join(process.resourcesPath, "backend", "backend.exe");
-  backendProc = spawn(exe, [], { cwd: path.dirname(exe), windowsHide: true });
-  backendProc.stdout.on("data", (d) => console.log("[be]", d.toString().trim()));
-  backendProc.stderr.on("data", (d) => console.error("[be]", d.toString().trim()));
-}
 
-async function waitForBackend(tries = 30) {
-  for (let i = 0; i < tries; i++) {
-    const r = await httpGet("http://localhost:8000/health");
-    if (r.ok) return true;
-    await wait(1000);
-  }
-  return false;
-}
-
-function createMainWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1280, height: 860, minWidth: 900, minHeight: 640,
-    webPreferences: { nodeIntegration: false, contextIsolation: true, preload: path.join(__dirname, "preload.cjs") },
-    titleBarStyle: "hiddenInset",
-    backgroundColor: "#030712",
-    show: false,
-    title: "StockOracle",
+  const backendPath = path.join(process.resourcesPath, "backend", "main.exe");
+  pythonProcess = spawn(backendPath, [], {
+    cwd: path.join(process.resourcesPath, "backend"),
   });
-  if (isDev) { mainWindow.loadURL("http://localhost:5173"); }
-  else       { mainWindow.loadFile(path.join(__dirname, "../../dist/index.html")); }
-  mainWindow.once("ready-to-show", () => mainWindow.show());
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
+
+  pythonProcess.stdout.on("data", (d) =>
+    console.log("[backend]", d.toString()),
+  );
+  pythonProcess.stderr.on("data", (d) =>
+    console.error("[backend]", d.toString()),
+  );
 }
 
-function registerIPC() {
-  ipcMain.handle("window-close",    () => mainWindow?.close());
-  ipcMain.handle("window-minimize", () => mainWindow?.minimize());
-  ipcMain.handle("window-maximize", () => mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize());
-  ipcMain.handle("check-backend",   async () => (await httpGet("http://localhost:8000/health")).ok);
-  ipcMain.handle("get-version",     () => app.getVersion());
-  ipcMain.handle("get-platform",    () => process.platform);
-  ipcMain.handle("retry-ollama-check", async () => getOllamaStatus());
-  ipcMain.handle("open-external",   (_, url) => shell.openExternal(url));
-}
-
+// ── 앱 시작 ──────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  registerIPC();
-  startBackend();
-  createMainWindow();
+  const ollamaOk = await checkOllama();
 
-  if (!isDev) {
-    const ready = await waitForBackend();
-    if (!ready) dialog.showErrorBox("백엔드 시작 실패", "백엔드를 시작할 수 없어요. 앱을 재시작해주세요.");
+  if (ollamaOk) {
+    startPythonServer();
+    createMainWindow();
+  } else {
+    createOllamaGuideWindow();
   }
 
-  const status = await getOllamaStatus();
-  if (status !== "ok") createOllamaWindow(status);
-
-  app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+  });
 });
 
 app.on("window-all-closed", () => {
-  backendProc?.kill();
+  if (pythonProcess) pythonProcess.kill();
   if (process.platform !== "darwin") app.quit();
 });
+
+// ══════════════════════════════════════════════════════════════════
+// Ollama 안내 팝업 HTML
+// ══════════════════════════════════════════════════════════════════
+const OLLAMA_GUIDE_HTML = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    background: #0c1428;
+    color: #e2e8f0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    -webkit-app-region: no-drag;
+    overflow: hidden;
+  }
+
+  /* 타이틀바 */
+  .titlebar {
+    height: 32px;
+    background: #070f1e;
+    border-bottom: 1px solid #1a2a4a;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    flex-shrink: 0;
+    -webkit-app-region: drag;
+  }
+  .close-btn {
+    -webkit-app-region: no-drag;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: #ef4444;
+    border: none; cursor: pointer;
+    transition: opacity .15s;
+  }
+  .close-btn:hover { opacity: .75; }
+  .titlebar-title {
+    font-size: 12px; color: #475569;
+    margin: 0 auto;
+  }
+
+  /* 본문 */
+  .content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 32px 24px;
+    overflow-y: auto;
+  }
+
+  .icon-wrap {
+    width: 68px; height: 68px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #1e3a5f, #0c4a6e);
+    border: 1px solid rgba(56,189,248,.25);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 34px;
+    margin-bottom: 18px;
+    box-shadow: 0 8px 32px rgba(14,165,233,.15);
+  }
+
+  h1 { font-size: 17px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px; text-align: center; }
+  .sub { font-size: 12px; color: #64748b; text-align: center; line-height: 1.65; margin-bottom: 24px; }
+
+  /* 단계 */
+  .steps { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
+
+  .step {
+    display: flex; align-items: flex-start; gap: 12px;
+    background: #111827;
+    border: 1px solid #1a2a4a;
+    border-radius: 11px;
+    padding: 12px 14px;
+    transition: border-color .2s;
+  }
+  .step:hover { border-color: rgba(56,189,248,.3); }
+
+  .num {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(14,165,233,.12);
+    border: 1px solid rgba(14,165,233,.3);
+    color: #38bdf8; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .step-body { flex: 1; }
+  .step-title { font-size: 12px; font-weight: 600; color: #cbd5e1; margin-bottom: 3px; }
+  .step-desc  { font-size: 11px; color: #475569; line-height: 1.55; }
+
+  code {
+    display: inline-block; margin-top: 6px;
+    background: #0c1428; border: 1px solid #1a2a4a;
+    border-radius: 6px; padding: 3px 9px;
+    font-family: "Cascadia Code", "JetBrains Mono", monospace;
+    font-size: 11px; color: #7dd3fc;
+    cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  code:hover { border-color: rgba(56,189,248,.5); background: #0f1e36; }
+  code.copied { color: #34d399; border-color: rgba(52,211,153,.4); }
+
+  /* 알림 */
+  .notice {
+    display: none; width: 100%; margin-bottom: 10px;
+    padding: 9px 12px; border-radius: 9px;
+    font-size: 11px; text-align: center; line-height: 1.5;
+  }
+  .notice.error {
+    display: block;
+    background: rgba(239,68,68,.09);
+    border: 1px solid rgba(239,68,68,.25);
+    color: #fca5a5;
+  }
+
+  /* 버튼 */
+  .actions { width: 100%; display: flex; flex-direction: column; gap: 7px; }
+
+  .btn-dl {
+    width: 100%; padding: 12px;
+    border-radius: 11px; border: none;
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    color: white; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: opacity .15s, transform .1s;
+  }
+  .btn-dl:hover { opacity: .9; transform: translateY(-1px); }
+  .btn-dl:active { transform: none; }
+
+  .btn-retry {
+    width: 100%; padding: 10px;
+    border-radius: 11px;
+    border: 1px solid rgba(56,189,248,.25);
+    background: rgba(14,165,233,.07);
+    color: #38bdf8; font-size: 12px; font-weight: 500;
+    cursor: pointer; transition: background .15s, border-color .15s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn-retry:hover { background: rgba(14,165,233,.13); border-color: rgba(56,189,248,.45); }
+  .btn-retry:disabled { opacity: .5; cursor: not-allowed; }
+
+  .btn-skip {
+    width: 100%; padding: 9px;
+    border-radius: 11px; border: 1px solid #1a2a4a;
+    background: transparent; color: #475569; font-size: 11px;
+    cursor: pointer; transition: color .15s;
+  }
+  .btn-skip:hover { color: #94a3b8; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    display: none; width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,.2);
+    border-top-color: #38bdf8;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+</style>
+</head>
+<body>
+
+<div class="titlebar">
+  <button class="close-btn" onclick="ipc('ollama-close')" title="종료"></button>
+  <span class="titlebar-title">StockOracle — 시작 준비</span>
+</div>
+
+<div class="content">
+  <div class="icon-wrap">🦙</div>
+
+  <h1>Ollama가 실행되지 않고 있어요</h1>
+  <p class="sub">StockOracle의 AI 분석은 Ollama 로컬 모델을 사용합니다.<br>아래 3단계를 완료한 뒤 <strong style="color:#38bdf8">재확인</strong>을 눌러주세요.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <div class="step-body">
+        <div class="step-title">Ollama 설치</div>
+        <div class="step-desc">아래 버튼으로 공식 사이트에서 Windows 설치파일을 받아 실행합니다.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">2</div>
+      <div class="step-body">
+        <div class="step-title">AI 모델 다운로드 <span style="color:#475569;font-weight:400">(약 9 GB · 최초 1회)</span></div>
+        <div class="step-desc">설치 후 <b>터미널(cmd 또는 PowerShell)</b>에서 실행하세요.</div>
+        <code id="c1" onclick="copy('ollama pull qwen2.5:14b','c1')">ollama pull qwen2.5:14b</code>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">3</div>
+      <div class="step-body">
+        <div class="step-title">Ollama 서버 시작</div>
+        <div class="step-desc">시스템 트레이에 Ollama 아이콘이 있으면 이미 실행 중입니다. 없으면 아래 명령을 실행하세요.</div>
+        <code id="c2" onclick="copy('ollama serve','c2')">ollama serve</code>
+      </div>
+    </div>
+  </div>
+
+  <div class="notice" id="notice"></div>
+
+  <div class="actions">
+    <button class="btn-dl" onclick="ipc('ollama-download')">🌐 Ollama 공식 사이트 열기</button>
+    <button class="btn-retry" id="retryBtn" onclick="retry()">
+      <span id="retryLabel">✓ 설치 완료했어요 — 다시 확인</span>
+      <div class="spinner" id="spin"></div>
+    </button>
+    <button class="btn-skip" onclick="ipc('ollama-skip')">AI 기능 없이 그냥 시작하기</button>
+  </div>
+</div>
+
+<script>
+  // preload에서 노출된 send / on 사용
+  function ipc(ch, data) {
+    window.electronAPI?.send(ch, data);
+  }
+
+  function retry() {
+    const btn = document.getElementById("retryBtn");
+    const label = document.getElementById("retryLabel");
+    const spin  = document.getElementById("spin");
+    const notice = document.getElementById("notice");
+
+    label.style.display = "none";
+    spin.style.display  = "block";
+    btn.disabled = true;
+    notice.className = "notice";
+
+    ipc("ollama-retry");
+
+    // 3.5초 후 버튼 복원 (IPC 응답이 느릴 경우 대비)
+    setTimeout(() => {
+      label.style.display = "block";
+      spin.style.display  = "none";
+      btn.disabled = false;
+    }, 3500);
+  }
+
+  // 실패 알림 수신
+  window.electronAPI?.on("ollama-still-missing", () => {
+    const notice = document.getElementById("notice");
+    notice.textContent = "Ollama가 아직 실행되지 않아요. 설치 후 'ollama serve'를 실행하고 다시 시도해주세요.";
+    notice.className = "notice error";
+
+    const btn = document.getElementById("retryBtn");
+    document.getElementById("retryLabel").style.display = "block";
+    document.getElementById("spin").style.display = "none";
+    btn.disabled = false;
+  });
+
+  // 코드 복사
+  function copy(text, id) {
+    navigator.clipboard.writeText(text).then(() => {
+      const el = document.getElementById(id);
+      const orig = el.textContent.trim();
+      el.textContent = "✓ 복사됨";
+      el.classList.add("copied");
+      setTimeout(() => { el.textContent = orig; el.classList.remove("copied"); }, 1500);
+    });
+  }
+</script>
+</body>
+</html>`;
