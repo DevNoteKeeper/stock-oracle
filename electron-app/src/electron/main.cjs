@@ -116,10 +116,9 @@ function createMainWindow() {
 function startPythonServer() {
   if (isDev) return;
 
-  const backendPath = path.join(process.resourcesPath, "backend", "main.exe");
-  pythonProcess = spawn(backendPath, [], {
-    cwd: path.join(process.resourcesPath, "backend"),
-  });
+  const backendPath = isDev
+    ? null // 개발 시엔 수동 실행
+    : path.join(process.resourcesPath, "backend", "backend.exe");
 
   pythonProcess.stdout.on("data", (d) =>
     console.log("[backend]", d.toString()),

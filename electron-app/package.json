@@ -9,6 +9,7 @@
     "electron:dev": "concurrently \"cross-env NODE_ENV=development electron .\" \"vite\"",
     "build": "tsc -b && vite build",
     "electron:build": "tsc -b && vite build && electron-builder",
+    "dist": "vite build && electron-builder",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -43,14 +44,30 @@
     "wait-on": "^9.0.4"
   },
   "build": {
-    "appId": "com.stockpredictor.app",
-    "productName": "주식 예측 분석기",
+    "appId": "com.stockoracle.app",
+    "productName": "StockOracle",
+    "directories": {
+      "output": "dist-electron"
+    },
     "files": [
       "dist/**/*",
       "src/electron/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "../python-backend/dist/backend.exe",
+        "to": "backend/backend.exe"
+      }
+    ],
     "win": {
       "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "StockOracle"
     }
   }
 }

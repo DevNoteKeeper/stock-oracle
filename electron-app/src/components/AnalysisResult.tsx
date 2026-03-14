@@ -194,12 +194,13 @@ export default function AnalysisResult({ stockData, analysisText, isLoading }: P
                     <Tooltip
                       contentStyle={{ background: "#0c1428", border: "1px solid #1a2a4a", borderRadius: 8, fontSize: 11 }}
                       labelStyle={{ color: "#94a3b8", fontFamily: "var(--font-mono)" }}
-                      formatter={(value: number, name: string) => {
+                      formatter={(value, name) => {
                         const labels: Record<string, string> = {
                           close: "종가", ma5: "MA5", ma20: "MA20",
                           bb_upper: "BB상단", bb_middle: "BB중심", bb_lower: "BB하단",
                         };
-                        return [value.toLocaleString(), labels[name] ?? name];
+                        const display = typeof value === "number" ? value.toLocaleString() : String(value ?? "");
+                        return [display, labels[String(name)] ?? String(name)] as [string, string];
                       }}
                     />
                     {/* 볼린저밴드 영역 */}
