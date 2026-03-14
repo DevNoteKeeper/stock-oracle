@@ -324,7 +324,11 @@ def build_prompt(data: dict) -> str:
         avg_p    = pos.get("avg_price", 0)
         invested = pos.get("total_invested", 0)
         cur_val  = pos.get("current_value", 0)
-        tgt_p    = pos.get("target_price")
+        tgt_p    = pos.get("target_sell_price")
+        tgt_pct  = pos.get("target_profit_pct")
+        tgt_amt  = pos.get("target_profit_amount")
+        gap_pct  = pos.get("gap_to_target_pct")
+        gap_price = pos.get("gap_to_target_price")
 
         if pl_pct >= 10:    pl_status = "수익 구간 (익절 검토 필요)"
         elif pl_pct >= 3:   pl_status = "소폭 수익 중"
@@ -334,8 +338,12 @@ def build_prompt(data: dict) -> str:
 
         target_line = ""
         if tgt_p:
-            gap = round((tgt_p - cur) / cur * 100, 2) if cur else 0
-            target_line = f"\n  목표가      : {tgt_p:,.0f}원  (현재가 대비 {gap:+.2f}% 필요)"
+            target_line = (
+                f"\n  희망 매도가  : {tgt_p:,.0f}원  "
+                f"(목표 수익률 {tgt_pct:+.1f}%  /  "
+                f"목표 수익금 +{tgt_amt:,.0f}원)\n"
+                f"  현재→목표   : {gap_price:+,.0f}원 차이  ({gap_pct:+.2f}% 필요)"
+            )
 
         position_block = (
             f"▶ 보유 포지션 (투자자 입력값)\n\n"
@@ -344,31 +352,46 @@ def build_prompt(data: dict) -> str:
             f"  총 투자금액 : {invested:,.0f}원\n"
             f"  현재 평가액 : {cur_val:,.0f}원\n"
             f"  평가 손익   : {pl_sign}{pl:,.0f}원  ({pl_sign}{pl_pct:.2f}%)\n"
-            f"  현재 상태   : {pl_status}{target_line}"
+            f"  현재 상태   : {pl_status}"
+            f"{target_line}"
         )
 
-        # 섹션 11 텍스트 (f-string 밖에서 별도 생성)
         section_11 = (
             f"\n## 11. 보유 포지션 전략\n"
             f"투자자가 {qty:,.0f}주를 평균 {avg_p:,.0f}원에 보유하고 있습니다.\n"
-            f"현재 {pl_sign}{pl_pct:.2f}% 손익 상태입니다.\n"
-            f"아래 항목을 **반드시 구체적인 가격과 근거**를 포함해 작성하세요.\n\n"
+            f"총 투자금액 {invested:,.0f}원, 현재 평가액 {cur_val:,.0f}원 ({pl_sign}{pl_pct:.2f}%).\n"
+        )
+
+        if tgt_p:
+            section_11 += (
+                f"희망 매도 목표가: {tgt_p:,.0f}원 (수익률 {tgt_pct:+.1f}%, 수익금 +{tgt_amt:,.0f}원)\n"
+                f"현재가 기준 {gap_price:+,.0f}원 / {gap_pct:+.2f}% 더 올라야 달성.\n\n"
+                f"아래 항목을 **반드시 구체적인 가격과 금액**을 포함해 작성하세요.\n\n"
+                f"**희망 매도가 {tgt_p:,.0f}원 달성 분석**:\n"
+                f"- 현재 기술적·수급 상황에서 {tgt_p:,.0f}원 도달 가능성 평가 (높음/보통/낮음)\n"
+                f"- 예상 도달 기간: 단기(1~2주) / 중기(1~3개월) / 장기(3개월+) 중 판단\n"
+                f"- 도달을 위해 필요한 조건 2~3가지 (구체적 지표나 이벤트)\n"
+                f"- 리스크가 높아 목표가 도달이 어렵다면: 중간 익절 구간 제시 (금액 명시)\n\n"
+            )
+        else:
+            section_11 += f"아래 항목을 **반드시 구체적인 가격과 금액**을 포함해 작성하세요.\n\n"
+
+        section_11 += (
             f"**현재 포지션 진단**:\n"
-            f"- 현재 수익률 {pl_sign}{pl_pct:.2f}%가 기술적·재무 관점에서 의미하는 바\n"
+            f"- 현재 {pl_sign}{pl_pct:.2f}% ({pl_sign}{pl:,.0f}원) 손익이 기술적·재무 관점에서 의미하는 바\n"
             f"- 지금 보유를 유지하는 게 맞는지, 왜 그런지\n\n"
-            f"**익절 전략**:\n"
-            f"- 1차 익절 목표가: XX원  (근거: 기술적 저항선 or 목표 수익률)\n"
-            f"- 2차 익절 목표가: XX원  (근거: )\n"
+            f"**익절 전략** (반드시 원 단위 금액으로 제시):\n"
+            f"- 1차 익절 목표가: XX원  →  수익금 +XX원 (근거: 기술적 저항선)\n"
+            f"- 2차 익절 목표가: XX원  →  수익금 +XX원 (근거: )\n"
             f"- 익절 타이밍 조건: 어떤 신호가 나오면 팔아야 하는가\n"
             f"- 분할 매도 비율: 1차에 XX%, 2차에 XX% 권장\n\n"
-            f"**추가매수 전략**:\n"
-            f"- 추가매수 적정 가격: XX원 이하  (근거: 지지선 or 이동평균)\n"
-            f"- 추가매수 조건: 어떤 상황일 때 매수해야 하는가\n"
-            f"- 추가매수 후 평균단가 변화: XX원\n\n"
-            f"**손절 기준**:\n"
-            f"- 손절 기준가: XX원 이탈 시  (현재가 대비 -XX%)\n"
+            f"**추가매수 전략** (반드시 원 단위 금액으로 제시):\n"
+            f"- 추가매수 적정 가격: XX원 이하  →  추가매수 후 평균단가 XX원\n"
+            f"- 추가매수 조건: 어떤 상황일 때 매수해야 하는가\n\n"
+            f"**손절 기준** (반드시 원 단위 금액으로 제시):\n"
+            f"- 손절 기준가: XX원 이탈 시  →  손실금 -XX원 (현재가 대비 -XX%)\n"
             f"- 손절이 필요한 시나리오:\n\n"
-            f"**최종 권고**: 지금 당장 취해야 할 행동 1가지를 명확하게 제시\n"
+            f"**최종 권고**: 지금 당장 취해야 할 행동 1가지를 금액과 함께 명확하게 제시\n"
         )
 
     section_count = "11개" if pos else "10개"

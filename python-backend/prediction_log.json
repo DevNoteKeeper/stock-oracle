@@ -1,0 +1,20 @@
+[
+  {
+    "id": "005930.KS_20260314",
+    "ticker": "005930.KS",
+    "company_name": "삼성전자",
+    "analysis_date": "2026-03-14",
+    "current_price": 183500.0,
+    "predicted_direction": "하락",
+    "predicted_pct_low": -1.0,
+    "predicted_pct_high": 0.0,
+    "predicted_price_low": 181665.0,
+    "predicted_price_high": 183500.0,
+    "actual_price": null,
+    "actual_direction": null,
+    "actual_pct": null,
+    "hit": null,
+    "in_range": null,
+    "verified_at": null
+  }
+]

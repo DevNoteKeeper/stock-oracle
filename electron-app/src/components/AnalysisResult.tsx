@@ -152,28 +152,26 @@ export default function AnalysisResult({ stockData, analysisText, isLoading }: P
             const pl     = position.profit_loss;
             const plPct  = position.profit_loss_pct;
             const isUp   = pl >= 0;
-            const plColor = isUp ? "var(--green)" : "var(--red)";
-            const plBg    = isUp ? "rgba(52,211,153,0.08)" : "rgba(248,113,113,0.08)";
-            const plBorder = isUp ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)";
+            const plColor  = isUp ? "var(--green)" : "var(--red)";
+            const plBg     = isUp ? "rgba(52,211,153,0.08)" : "rgba(248,113,113,0.08)";
+            const plBorder = isUp ? "rgba(52,211,153,0.2)"  : "rgba(248,113,113,0.2)";
 
-            // 목표가까지 남은 %
-            const toTarget = position.target_price
-              ? round((position.target_price - (stock?.current_price ?? 0)) / (stock?.current_price ?? 1) * 100, 2)
-              : null;
-
-            // 진행 바 (평균매수가 ~ 현재가 ~ 목표가)
             const avg = position.avg_price;
             const cur = stock?.current_price ?? avg;
-            const tgt = position.target_price ?? cur * 1.2;
-            const barMin = Math.min(avg, cur) * 0.97;
-            const barMax = Math.max(tgt, cur) * 1.03;
-            const avgPct  = ((avg - barMin) / (barMax - barMin)) * 100;
-            const curPct  = ((cur - barMin) / (barMax - barMin)) * 100;
-            const tgtPct  = ((tgt - barMin) / (barMax - barMin)) * 100;
+            const tgt = position.target_sell_price ?? null;
 
-            function round(n: number, d: number) {
-              return Math.round(n * Math.pow(10, d)) / Math.pow(10, d);
-            }
+            // 진행 바 범위 계산
+            const barMin = Math.min(avg, cur, tgt ?? cur) * 0.97;
+            const barMax = Math.max(avg, cur, tgt ?? cur) * 1.03;
+            const pctOf  = (v: number) => ((v - barMin) / (barMax - barMin)) * 100;
+            const avgPct = pctOf(avg);
+            const curPct = pctOf(cur);
+            const tgtPct = tgt ? pctOf(tgt) : null;
+
+            const gapPct   = position.gap_to_target_pct;
+            const gapPrice = position.gap_to_target_price;
+            const tgtAmt   = position.target_profit_amount;
+            const tgtPctV  = position.target_profit_pct;
 
             return (
               <Panel>
@@ -193,12 +191,20 @@ export default function AnalysisResult({ stockData, analysisText, isLoading }: P
                 </div>
 
                 {/* 핵심 수치 4개 */}
-                <div className="grid grid-cols-4 gap-2 mb-4">
+                <div className="grid grid-cols-4 gap-2 mb-3">
                   {[
-                    { label: "보유 수량",   value: `${position.quantity.toLocaleString()}주`,             color: "var(--text-primary)" },
-                    { label: "평균 매수가", value: `${position.avg_price.toLocaleString()}원`,            color: "var(--text-primary)" },
-                    { label: "총 투자금",   value: `${(position.total_invested / 10000).toFixed(0)}만원`, color: "var(--text-secondary)" },
-                    { label: "현재 평가액", value: `${(position.current_value / 10000).toFixed(0)}만원`,  color: isUp ? "var(--green)" : "var(--red)" },
+                    { label: "보유 수량",   value: `${position.quantity.toLocaleString()}주`,  color: "var(--text-primary)" },
+                    { label: "평균 매수가", value: `${position.avg_price.toLocaleString()}원`, color: "var(--text-primary)" },
+                    { label: "총 투자금",
+                      value: position.total_invested >= 100000000
+                        ? `${(position.total_invested / 100000000).toFixed(1)}억원`
+                        : `${(position.total_invested / 10000).toFixed(0)}만원`,
+                      color: "var(--text-secondary)" },
+                    { label: "현재 평가액",
+                      value: position.current_value >= 100000000
+                        ? `${(position.current_value / 100000000).toFixed(1)}억원`
+                        : `${(position.current_value / 10000).toFixed(0)}만원`,
+                      color: isUp ? "var(--green)" : "var(--red)" },
                   ].map(({ label, value, color }) => (
                     <div key={label} className="rounded-xl p-3 text-center"
                       style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
@@ -208,24 +214,25 @@ export default function AnalysisResult({ stockData, analysisText, isLoading }: P
                   ))}
                 </div>
 
-                {/* 평가 손익 강조 */}
-                <div className="rounded-xl p-3 mb-4 flex items-center justify-between"
+                {/* 평가 손익 강조 — % + 원 둘 다 */}
+                <div className="rounded-xl p-3 mb-3 flex items-center justify-between"
                   style={{ background: plBg, border: `1px solid ${plBorder}` }}>
                   <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>평가 손익</span>
-                  <div className="text-right">
+                  <div className="flex items-center gap-3">
                     <span className="text-xl font-bold num" style={{ color: plColor }}>
                       {isUp ? "+" : ""}{pl.toLocaleString()}원
                     </span>
-                    <span className="text-sm font-semibold num ml-2" style={{ color: plColor }}>
-                      ({isUp ? "+" : ""}{plPct.toFixed(2)}%)
+                    <span className="text-sm font-semibold num px-2 py-0.5 rounded"
+                      style={{ background: isUp ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)", color: plColor }}>
+                      {isUp ? "+" : ""}{plPct.toFixed(2)}%
                     </span>
                   </div>
                 </div>
 
                 {/* 가격 진행 바 */}
-                <div className="mb-2">
+                <div className="mb-3">
                   <div className="relative h-2 rounded-full mb-2" style={{ background: "var(--border)" }}>
-                    {/* 수익 구간 채우기 */}
+                    {/* 수익/손실 구간 채우기 */}
                     <div className="absolute top-0 bottom-0 rounded-full"
                       style={{
                         left: `${Math.min(avgPct, curPct)}%`,
@@ -233,43 +240,97 @@ export default function AnalysisResult({ stockData, analysisText, isLoading }: P
                         background: isUp ? "rgba(52,211,153,0.4)" : "rgba(248,113,113,0.4)",
                       }} />
                     {/* 평균매수가 마커 */}
-                    <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white"
-                      style={{ left: `${avgPct}%`, transform: "translate(-50%,-50%)", background: "var(--text-muted)", zIndex: 2 }} />
+                    <div className="absolute"
+                      style={{ left: `${avgPct}%`, top: "50%", transform: "translate(-50%,-50%)",
+                        width: 12, height: 12, borderRadius: "50%", background: "var(--text-muted)",
+                        border: "2px solid var(--bg-base)", zIndex: 2 }} />
                     {/* 현재가 마커 */}
-                    <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white"
-                      style={{ left: `${curPct}%`, transform: "translate(-50%,-50%)", background: plColor, zIndex: 3,
+                    <div className="absolute"
+                      style={{ left: `${curPct}%`, top: "50%", transform: "translate(-50%,-50%)",
+                        width: 14, height: 14, borderRadius: "50%", background: plColor,
+                        border: "2px solid var(--bg-base)", zIndex: 3,
                         boxShadow: `0 0 8px ${plColor}` }} />
-                    {/* 목표가 마커 */}
-                    {position.target_price && (
-                      <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2"
-                        style={{ left: `${tgtPct}%`, transform: "translate(-50%,-50%)", background: "var(--gold)",
-                          borderColor: "var(--gold)", zIndex: 2 }} />
+                    {/* 희망 매도가 마커 */}
+                    {tgtPct != null && (
+                      <div className="absolute"
+                        style={{ left: `${tgtPct}%`, top: "50%", transform: "translate(-50%,-50%)",
+                          width: 12, height: 12, borderRadius: "50%", background: "var(--gold)",
+                          border: "2px solid var(--bg-base)", zIndex: 2 }} />
                     )}
                   </div>
                   <div className="flex justify-between text-xs num" style={{ color: "var(--text-muted)" }}>
-                    <span>매수 {position.avg_price.toLocaleString()}</span>
-                    <span style={{ color: plColor, fontWeight: 600 }}>현재 {(stock?.current_price ?? 0).toLocaleString()}</span>
-                    {position.target_price && (
-                      <span style={{ color: "var(--gold)" }}>목표 {position.target_price.toLocaleString()}</span>
-                    )}
+                    <span>매수 {avg.toLocaleString()}</span>
+                    <span style={{ color: plColor, fontWeight: 600 }}>현재 {cur.toLocaleString()}</span>
+                    {tgt && <span style={{ color: "var(--gold)" }}>목표 {tgt.toLocaleString()}</span>}
                   </div>
                 </div>
 
-                {/* 목표가까지 거리 */}
-                {toTarget !== null && (
-                  <div className="mt-3 rounded-lg px-3 py-2 flex items-center justify-between"
-                    style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
-                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>목표 수익률 달성까지</span>
-                    <span className="text-sm font-bold num" style={{ color: "var(--gold)" }}>
-                      {toTarget > 0 ? `+${toTarget.toFixed(2)}% 필요` : "목표 달성! 익절 검토"}
-                    </span>
+                {/* 희망 매도가 달성 현황 */}
+                {tgt && gapPct != null && gapPrice != null && tgtAmt != null && tgtPctV != null && (
+                  <div className="space-y-2 mb-3">
+                    {/* 달성까지 남은 거리 */}
+                    <div className="rounded-xl p-3"
+                      style={{ background: gapPct <= 0 ? "rgba(52,211,153,0.08)" : "rgba(245,158,11,0.06)",
+                        border: `1px solid ${gapPct <= 0 ? "rgba(52,211,153,0.2)" : "rgba(245,158,11,0.2)"}` }}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+                          🎯 희망 매도가 {tgt.toLocaleString()}원
+                        </span>
+                        {gapPct <= 0
+                          ? <span className="text-xs font-bold" style={{ color: "var(--green)" }}>✅ 목표 달성! 익절 검토</span>
+                          : <span className="text-xs font-bold num" style={{ color: "var(--gold)" }}>
+                              +{gapPrice.toLocaleString()}원 / +{gapPct.toFixed(2)}% 필요
+                            </span>
+                        }
+                      </div>
+                      {gapPct > 0 && (
+                        <div className="relative h-1 rounded-full mt-2" style={{ background: "var(--border)" }}>
+                          <div className="absolute left-0 top-0 bottom-0 rounded-full"
+                            style={{ width: `${Math.min((plPct / (plPct + gapPct)) * 100, 100)}%`,
+                              background: "linear-gradient(90deg,#f59e0b,#fbbf24)" }} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 목표 달성 시 수익 */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-xl p-2.5 text-center"
+                        style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                        <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>목표 수익률</p>
+                        <p className="text-sm font-bold num" style={{ color: "var(--gold)" }}>+{tgtPctV.toFixed(1)}%</p>
+                      </div>
+                      <div className="rounded-xl p-2.5 text-center"
+                        style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                        <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>목표 수익금</p>
+                        <p className="text-sm font-bold num" style={{ color: "var(--gold)" }}>
+                          +{tgtAmt >= 10000000
+                            ? `${(tgtAmt / 10000000).toFixed(1)}천만`
+                            : tgtAmt >= 10000
+                            ? `${(tgtAmt / 10000).toFixed(0)}만`
+                            : tgtAmt.toLocaleString()}원
+                        </p>
+                      </div>
+                      <div className="rounded-xl p-2.5 text-center"
+                        style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                        <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>목표 달성 시 총액</p>
+                        <p className="text-sm font-bold num" style={{ color: "var(--gold)" }}>
+                          {(() => {
+                            const total = position.total_invested + tgtAmt;
+                            return total >= 100000000
+                              ? `${(total / 100000000).toFixed(1)}억`
+                              : `${(total / 10000).toFixed(0)}만원`;
+                          })()}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 )}
 
                 {/* AI 포지션 분석 안내 */}
-                <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                <div className="mt-2 flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
                   <span style={{ color: "#a78bfa" }}>💡</span>
-                  아래 AI 분석 <span style={{ color: "#a78bfa", fontWeight: 600 }}>§ 11. 보유 포지션 전략</span>에서 익절·추가매수·손절 구체적 조언을 확인하세요
+                  아래 AI 분석 <span style={{ color: "#a78bfa", fontWeight: 600 }}>§ 11. 보유 포지션 전략</span>에서
+                  희망 매도가 달성 예상 기간 및 익절·손절 조언을 확인하세요
                 </div>
               </Panel>
             );

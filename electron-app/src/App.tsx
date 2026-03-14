@@ -169,6 +169,10 @@ export interface StockData {
     profit_loss_pct: number;
     target_profit_pct?: number;
     target_price?: number;
+    target_sell_price?: number; 
+    target_profit_amount?: number;
+    gap_to_target_pct?: number;
+    gap_to_target_price?: number;
   };
 }
 

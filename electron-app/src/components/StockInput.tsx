@@ -10,6 +10,7 @@ export interface PositionInfo {
   quantity: number;
   avgPrice: number;
   targetProfitPct?: number;  // 목표 수익률 (선택)
+  targetSellPrice?: number;
 }
 
 const PRESETS: Record<string, { ticker: string; name: string; desc: string }[]> = {
@@ -182,6 +183,7 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
   const [quantity, setQuantity] = useState("");
   const [avgPrice, setAvgPrice] = useState("");
   const [targetPct, setTargetPct] = useState("");
+  const [targetSellPrice, setTargetSellPrice] = useState("");
 
   const handlePreset = (t: string, n: string) => {
     setTicker(t);
@@ -203,6 +205,7 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
       quantity: parseFloat(quantity),
       avgPrice: parseFloat(avgPrice),
       targetProfitPct: targetPct ? parseFloat(targetPct) : undefined,
+      targetSellPrice: targetSellPrice ? parseFloat(targetSellPrice) : undefined,
     } : undefined;
     onAnalyze(ticker.trim().toUpperCase(), companyName.trim(), country, position);
   };
@@ -426,21 +429,74 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
                 </div>
               )}
 
-              {/* 목표 수익률 (선택) */}
-              <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
-                <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>목표 수익률 <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(선택 — 없으면 AI가 판단)</span></p>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    value={targetPct}
-                    onChange={(e) => setTargetPct(e.target.value)}
-                    placeholder="20"
-                    className="w-full bg-transparent text-sm font-semibold outline-none num"
-                    style={{ color: "var(--text-primary)" }}
-                  />
-                  <span className="text-xs flex-shrink-0" style={{ color: "var(--text-muted)" }}>%</span>
+              {/* 목표 수익률 + 희망 매도 금액 */}
+              <div className="grid grid-cols-2 gap-2">
+                {/* 목표 수익률 */}
+                <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                  <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>
+                    목표 수익률 <span style={{ fontWeight: 400 }}>(선택)</span>
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={targetPct}
+                      onChange={(e) => {
+                        setTargetPct(e.target.value);
+                        // 수익률 입력 시 희망 매도 금액 자동 계산
+                        if (e.target.value && avgPrice) {
+                          const price = parseFloat(avgPrice) * (1 + parseFloat(e.target.value) / 100);
+                          setTargetSellPrice(Math.round(price).toString());
+                        } else {
+                          setTargetSellPrice("");
+                        }
+                      }}
+                      placeholder="20"
+                      className="w-full bg-transparent text-sm font-semibold outline-none num"
+                      style={{ color: "var(--text-primary)" }}
+                    />
+                    <span className="text-xs flex-shrink-0" style={{ color: "var(--text-muted)" }}>%</span>
+                  </div>
+                </div>
+
+                {/* 희망 매도 금액 */}
+                <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--bg-panel)", border: "1px solid var(--border)" }}>
+                  <p className="text-xs mb-1" style={{ color: "var(--text-muted)" }}>
+                    희망 매도 금액 <span style={{ fontWeight: 400 }}>(선택)</span>
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={targetSellPrice}
+                      onChange={(e) => {
+                        setTargetSellPrice(e.target.value);
+                        // 금액 입력 시 목표 수익률 자동 계산
+                        if (e.target.value && avgPrice) {
+                          const pct = (parseFloat(e.target.value) / parseFloat(avgPrice) - 1) * 100;
+                          setTargetPct(pct.toFixed(1));
+                        } else {
+                          setTargetPct("");
+                        }
+                      }}
+                      placeholder="90000"
+                      className="w-full bg-transparent text-sm font-semibold outline-none num"
+                      style={{ color: "var(--text-primary)" }}
+                    />
+                    <span className="text-xs flex-shrink-0" style={{ color: "var(--text-muted)" }}>원</span>
+                  </div>
                 </div>
               </div>
+
+              {/* 목표 수익 금액 자동 계산 */}
+              {targetSellPrice && quantity && avgPrice && (
+                <div className="flex items-center justify-between px-3 py-2 rounded-lg mt-2"
+                  style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)" }}>
+                  <span className="text-xs" style={{ color: "var(--text-muted)" }}>목표 수익 금액</span>
+                  <span className="text-xs font-semibold num" style={{ color: "var(--gold)" }}>
+                    +{((parseFloat(targetSellPrice) - parseFloat(avgPrice)) * parseFloat(quantity)).toLocaleString()}원
+                    <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> ({targetPct}%)</span>
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

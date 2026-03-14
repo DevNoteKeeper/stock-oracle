@@ -25,6 +25,7 @@ class PositionInfo(BaseModel):
     quantity: float
     avgPrice: float
     targetProfitPct: float | None = None
+    targetSellPrice: float | None = None
 
 
 class AnalyzeRequest(BaseModel):
@@ -47,29 +48,48 @@ class SavePredictionRequest(BaseModel):
 
 
 def _calc_position(req: AnalyzeRequest, current_price: float) -> dict | None:
-    """보유 포지션 계산"""
     if not req.position:
         return None
-    qty       = req.position.quantity
-    avg       = req.position.avgPrice
-    cur       = current_price
-    invested  = round(qty * avg, 0)
-    cur_value = round(qty * cur, 0)
-    pl        = round(cur_value - invested, 0)
-    pl_pct    = round((cur - avg) / avg * 100, 2) if avg > 0 else 0
-    target_pct   = req.position.targetProfitPct
-    target_price = round(avg * (1 + target_pct / 100), 0) if target_pct else None
-    return {
-        "quantity":          qty,
-        "avg_price":         avg,
-        "total_invested":    invested,
-        "current_value":     cur_value,
-        "profit_loss":       pl,
-        "profit_loss_pct":   pl_pct,
-        "target_profit_pct": target_pct,
-        "target_price":      target_price,
-    }
+    qty      = req.position.quantity
+    avg      = req.position.avgPrice
+    cur      = current_price
+    invested = round(qty * avg, 0)
+    cur_val  = round(qty * cur, 0)
+    pl       = round(cur_val - invested, 0)
+    pl_pct   = round((cur - avg) / avg * 100, 2) if avg > 0 else 0
 
+    # 목표가 결정 — 희망 매도 금액 우선, 없으면 수익률로 계산
+    target_sell_price = req.position.targetSellPrice
+    target_pct        = req.position.targetProfitPct
+
+    if target_sell_price:
+        # 금액 입력 → 수익률 역산
+        target_pct = round((target_sell_price / avg - 1) * 100, 2) if avg > 0 else None
+    elif target_pct:
+        # 수익률 입력 → 금액 계산
+        target_sell_price = round(avg * (1 + target_pct / 100), 0)
+
+    # 목표 도달 시 수익 금액
+    target_profit_amount = round((target_sell_price - avg) * qty, 0) if target_sell_price else None
+
+    # 현재가 → 목표가까지 남은 금액/퍼센트
+    gap_to_target_pct   = round((target_sell_price - cur) / cur * 100, 2) if target_sell_price and cur else None
+    gap_to_target_price = round(target_sell_price - cur, 0) if target_sell_price else None
+
+    return {
+        "quantity":             qty,
+        "avg_price":            avg,
+        "total_invested":       invested,
+        "current_value":        cur_val,
+        "profit_loss":          pl,
+        "profit_loss_pct":      pl_pct,
+        "profit_loss_amount":   pl,  # 원 단위 손익 (명시적)
+        "target_profit_pct":    target_pct,
+        "target_sell_price":    target_sell_price,
+        "target_profit_amount": target_profit_amount,
+        "gap_to_target_pct":    gap_to_target_pct,
+        "gap_to_target_price":  gap_to_target_price,
+    }
 
 @app.get("/")
 def root():
