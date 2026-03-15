@@ -68,7 +68,7 @@
 ### 1. 코드 받기
 
 ```bash
-git clone https://github.com/your-username/stock-predictor.git
+git clone https://github.com/DevNoteKeeper/stock-oracle.git
 cd stock-predictor
 ```
 
