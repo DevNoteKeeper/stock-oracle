@@ -3,6 +3,7 @@ import StockInput from "./components/StockInput";
 import type { PositionInfo } from "./components/StockInput";
 import AnalysisResult from "./components/AnalysisResult";
 import PredictionHistory from "./components/PredictionHistory";
+import AiChat from "./components/AiChat";
 
 export interface StockData {
   ticker: string;
@@ -530,12 +531,19 @@ export default function App() {
           )}
 
           {(appState === "analyzing" || appState === "done") && (
-            <AnalysisResult
-              stockData={stockData}
-              analysisText={analysisText}
-              isLoading={appState === "analyzing"}
-            />
-          )}
+          <AnalysisResult
+            stockData={stockData}
+            analysisText={analysisText}
+            isLoading={appState === "analyzing"}
+          />
+        )}
+
+        {/* AI 채팅 — 분석 완료 후 플로팅 버튼 */}
+        <AiChat
+          stockData={stockData}
+          analysisText={analysisText}
+          isAnalysisDone={appState === "done"}
+        />
         </div>
       </main>
 

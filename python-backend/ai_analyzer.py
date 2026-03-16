@@ -1,9 +1,13 @@
 import requests
 import json
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "qwen2.5:14b"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
+MODEL        = "llama-3.3-70b-versatile"
 
 
 def build_prompt(data: dict) -> str:
@@ -515,65 +519,71 @@ def build_prompt(data: dict) -> str:
 
 
 def analyze_stream(data: dict):
-    """스트리밍 방식으로 분석"""
+    """스트리밍 방식으로 분석 (Groq API)"""
     prompt = build_prompt(data)
     try:
         response = requests.post(
-            OLLAMA_URL,
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
             json={
                 "model": MODEL,
-                "prompt": prompt,
+                "messages": [{"role": "user", "content": prompt}],
                 "stream": True,
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": 2000,
-                    "repeat_penalty": 1.2,
-                    "top_p": 0.9,
-                },
+                "temperature": 0.3,
+                "max_tokens": 4000,
             },
             stream=True,
-            timeout=180,
+            timeout=120,
         )
+
         for line in response.iter_lines():
-            if line:
-                chunk = json.loads(line)
-                token = chunk.get("response", "")
-                if token:
-                    yield token
-                if chunk.get("done"):
+            if not line:
+                continue
+            line = line.decode("utf-8") if isinstance(line, bytes) else line
+            if line.startswith("data: "):
+                chunk = line[6:]
+                if chunk.strip() == "[DONE]":
                     break
+                try:
+                    data_chunk = json.loads(chunk)
+                    token = data_chunk["choices"][0]["delta"].get("content", "")
+                    if token:
+                        yield token
+                except Exception:
+                    continue
+
     except requests.exceptions.ConnectionError:
-        yield "❌ Ollama가 실행되지 않고 있어요. 터미널에서 'ollama serve' 를 먼저 실행해주세요."
+        yield "❌ Groq API에 연결할 수 없어요. 인터넷 연결을 확인해주세요."
     except requests.exceptions.Timeout:
         yield "❌ 분석 시간이 초과됐어요. 다시 시도해주세요."
     except Exception as e:
         yield f"❌ 오류: {str(e)}"
-
 
 def analyze(data: dict) -> str:
     """단일 응답 방식 (테스트용)"""
     prompt = build_prompt(data)
     try:
         response = requests.post(
-            OLLAMA_URL,
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
             json={
                 "model": MODEL,
-                "prompt": prompt,
+                "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": 2000,
-                    "repeat_penalty": 1.2,
-                    "top_p": 0.9,
-                },
+                "temperature": 0.3,
+                "max_tokens": 4000,
             },
-            timeout=180,
+            timeout=120,
         )
         if response.status_code == 200:
-            return response.json().get("response", "분석 결과를 가져올 수 없어요.")
+            return response.json()["choices"][0]["message"]["content"]
         else:
-            return f"Ollama 오류: {response.status_code}"
-    except requests.exceptions.ConnectionError:
-        return "❌ Ollama가 실행되지 않고 있어요."
+            return f"Groq 오류: {response.status_code} {response.text}"
     except Exception as e:
         return f"❌ 오류: {str(e)}"

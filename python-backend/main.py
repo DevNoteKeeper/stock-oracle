@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import os
 import json, re
 from datetime import datetime
 
@@ -244,6 +245,139 @@ def ticker_hint(country: str, name: str):
     }
     return hints.get(country, {"format": "Yahoo Finance 티커 형식 사용", "examples": []})
 
+class ChatRequest(BaseModel):
+    message: str
+    stock_data: dict | None = None
+    analysis_text: str = ""
+    history: list[dict] = []
+
+
+@app.post("/chat")
+def chat(req: ChatRequest):
+    """AI 채팅 — 분석 데이터 컨텍스트 기반 스트리밍"""
+
+    def build_chat_prompt() -> str:
+        ctx = ""
+
+        # 분석 데이터 컨텍스트
+        if req.stock_data:
+            stock      = req.stock_data.get("stock", {})
+            indicators = req.stock_data.get("market_indicators", {})
+            investor   = req.stock_data.get("investor_trading", {})
+            tech       = req.stock_data.get("technicals", {})
+            fin        = req.stock_data.get("financials", {})
+            pos        = req.stock_data.get("position")
+            company    = req.stock_data.get("company_name", "")
+            ticker     = req.stock_data.get("ticker", "")
+
+            ctx += f"【분석 대상】 {company} ({ticker})\n\n"
+
+            ctx += f"【현재 주가】\n"
+            ctx += f"  현재가: {stock.get('current_price'):,}원\n"
+            ctx += f"  전일 대비: {stock.get('change_pct')}%\n"
+            ctx += f"  52주 최고: {stock.get('high_52w'):,}원 / 최저: {stock.get('low_52w'):,}원\n\n"
+
+            ctx += f"【시장 지표】\n"
+            ctx += f"  코스피: {indicators.get('kospi', {}).get('price')} ({indicators.get('kospi', {}).get('change_pct')}%)\n"
+            ctx += f"  달러/원: {indicators.get('usd_krw', {}).get('price')}\n"
+            ctx += f"  S&P500 선물: {indicators.get('sp500_futures', {}).get('change_pct')}%\n\n"
+
+            if investor.get("available"):
+                summary = investor.get("5day_summary", {})
+                ctx += f"【외국인/기관 수급】\n"
+                ctx += f"  외국인 5일: {summary.get('foreign_net_str')}\n"
+                ctx += f"  기관 5일: {summary.get('institution_net_str')}\n\n"
+
+            if tech.get("available"):
+                ctx += f"【기술적 지표】\n"
+                ctx += f"  RSI: {tech.get('rsi')} ({tech.get('rsi_label')})\n"
+                ctx += f"  MACD: {tech.get('macd_label')}\n"
+                ctx += f"  볼린저밴드 %B: {round(tech.get('bb_pct_b', 0) * 100, 1)}%\n"
+                ctx += f"  MA5: {tech.get('ma5')} / MA20: {tech.get('ma20')} / MA60: {tech.get('ma60')}\n\n"
+
+            if fin.get("available"):
+                ctx += f"【재무 지표】\n"
+                ctx += f"  PER: {fin.get('per')} / PBR: {fin.get('pbr')}\n"
+                ctx += f"  ROE: {fin.get('roe')}% / 영업이익률: {fin.get('op_margin')}%\n\n"
+
+            if pos:
+                ctx += f"【보유 포지션】\n"
+                ctx += f"  보유: {pos.get('quantity'):,}주 / 평균매수가: {pos.get('avg_price'):,}원\n"
+                ctx += f"  평가손익: {pos.get('profit_loss'):,}원 ({pos.get('profit_loss_pct'):+.2f}%)\n"
+                if pos.get("target_sell_price"):
+                    ctx += f"  희망매도가: {pos.get('target_sell_price'):,}원\n"
+                ctx += "\n"
+
+        # 이전 AI 분석 리포트 요약
+        if req.analysis_text:
+            ctx += f"【AI 분석 리포트 요약】\n{req.analysis_text[:2000]}...\n\n"
+
+        # 대화 히스토리
+        history_text = ""
+        for msg in req.history[-6:]:  # 최근 6개만
+            role = "사용자" if msg["role"] == "user" else "AI"
+            history_text += f"{role}: {msg['content']}\n"
+
+        prompt = (
+            f"당신은 주식 분석 전문가 AI 어시스턴트입니다.\n"
+            f"아래 분석 데이터를 바탕으로 사용자의 질문에 친절하고 구체적으로 답변하세요.\n"
+            f"수치를 인용할 때는 반드시 제공된 데이터에서 가져오세요.\n"
+            f"**반드시 한국어로만 답변하세요.**\n\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"{ctx}"
+            f"━━━━━━━━━━━━━━━━━━━\n\n"
+        )
+
+        if history_text:
+            prompt += f"【이전 대화】\n{history_text}\n"
+
+        prompt += f"사용자: {req.message}\nAI:"
+
+        return prompt
+
+    def stream_chat():
+        prompt = build_chat_prompt()
+        try:
+            import requests as req_lib
+            import json as _json
+
+            response = req_lib.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": True,
+                    "temperature": 0.5,
+                    "max_tokens": 1000,
+                },
+                stream=True,
+                timeout=120,
+            )
+
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                line = line.decode("utf-8") if isinstance(line, bytes) else line
+                if line.startswith("data: "):
+                    chunk = line[6:]
+                    if chunk.strip() == "[DONE]":
+                        break
+                    try:
+                        data_chunk = _json.loads(chunk)
+                        token = data_chunk["choices"][0]["delta"].get("content", "")
+                        if token:
+                            yield f"data: {_json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
+                    except Exception:
+                        continue
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'token', 'payload': f'❌ 오류: {str(e)}'})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 if __name__ == "__main__":
     import uvicorn
