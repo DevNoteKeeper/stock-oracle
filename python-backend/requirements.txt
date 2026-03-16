@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+yfinance
+beautifulsoup4
+lxml
+requests
+python-dotenv
+groq
