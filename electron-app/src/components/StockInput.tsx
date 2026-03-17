@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Search, TrendingUp, Globe, Zap } from "lucide-react";
 
 interface Props {
-  onAnalyze: (ticker: string, companyName: string, country: string, position?: PositionInfo) => void;
+  onAnalyze: (ticker: string, companyName: string, country: string, position?: PositionInfo, period?: string) => void;
   backendOk: boolean;
 }
 
@@ -184,6 +184,7 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
   const [avgPrice, setAvgPrice] = useState("");
   const [targetPct, setTargetPct] = useState("");
   const [targetSellPrice, setTargetSellPrice] = useState("");
+  const [period, setPeriod] = useState("tomorrow");
 
   const handlePreset = (t: string, n: string) => {
     setTicker(t);
@@ -207,8 +208,7 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
       targetProfitPct: targetPct ? parseFloat(targetPct) : undefined,
       targetSellPrice: targetSellPrice ? parseFloat(targetSellPrice) : undefined,
     } : undefined;
-    onAnalyze(ticker.trim().toUpperCase(), companyName.trim(), country, position);
-  };
+    onAnalyze(ticker.trim().toUpperCase(), companyName.trim(), country, position, period);  };
 
   return (
     <div className="max-w-2xl mx-auto slide-up">
@@ -222,7 +222,9 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
           AI 기반 종합 시황 분석
         </div>
         <h1 className="text-3xl font-bold mb-3" style={{ color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
-          내일의 주가를 예측해드려요
+          {period === "tomorrow" ? "내일의 주가를 예측해드려요" :
+           period === "week"     ? "이번 주 주가를 예측해드려요" :
+                                   "이번 달 주가를 예측해드려요"}
         </h1>
         <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
           환율 · 유가 · 선물 · 외국인/기관 수급 · 뉴스를 종합 분석합니다
@@ -349,6 +351,39 @@ export default function StockInput({ onAnalyze, backendOk }: Props) {
               {item}
             </div>
           ))}
+        </div>
+{/* 예측 기간 선택 */}
+        <div>
+          <label className="flex items-center gap-1.5 text-xs font-medium mb-2.5"
+            style={{ color: "var(--text-secondary)" }}>
+            <Zap size={12} /> 예측 기간
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { value: "tomorrow", label: "내일",   desc: "1거래일",   icon: "📅" },
+              { value: "week",     label: "1주일",  desc: "5거래일",   icon: "📆" },
+              { value: "month",    label: "1개월",  desc: "20거래일",  icon: "🗓️" },
+            ].map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setPeriod(p.value)}
+                className="py-3 rounded-xl text-center transition-all"
+                style={{
+                  background: period === p.value ? "var(--accent-dim)" : "var(--bg-card)",
+                  border: `1px solid ${period === p.value ? "rgba(56,189,248,0.4)" : "var(--border)"}`,
+                  boxShadow: period === p.value ? "0 0 12px rgba(56,189,248,0.15)" : "none",
+                }}
+              >
+                <div className="text-base mb-0.5">{p.icon}</div>
+                <p className="text-sm font-semibold"
+                  style={{ color: period === p.value ? "var(--accent)" : "var(--text-primary)" }}>
+                  {p.label}
+                </p>
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>{p.desc}</p>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* 보유 포지션 입력 */}

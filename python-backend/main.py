@@ -34,6 +34,7 @@ class AnalyzeRequest(BaseModel):
     company_name: str
     country: str
     position: PositionInfo | None = None
+    period: str = "tomorrow" # tomorrow / week / month
 
 
 class SavePredictionRequest(BaseModel):
@@ -127,6 +128,7 @@ def analyze(req: AnalyzeRequest):
     pos = _calc_position(req, float(data["stock"].get("current_price", 0)))
     if pos:
         data["position"] = pos
+    data["period"] = req.period
 
     def stream_response():
         # 1. 수집 데이터 전송
