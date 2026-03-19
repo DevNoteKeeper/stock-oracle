@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions"
-MODEL      = "llama-3.1-8b-instant"
+MODEL      = "llama-3.3-70b-versatile"
 
 # ── 키 로테이션 ───────────────────────────────────────────────────
 GROQ_KEYS = [k for k in [
