@@ -339,45 +339,82 @@ def chat(req: ChatRequest):
 
     def stream_chat():
         prompt = build_chat_prompt()
-        try:
-            import requests as req_lib
-            import json as _json
+        import requests as req_lib
+        import json as _json
+        from ai_analyzer import GROQ_KEYS, GROQ_URL, _get_key, _rotate_key, _is_rate_limit
 
-            response = req_lib.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": True,
-                    "temperature": 0.5,
-                    "max_tokens": 1000,
-                },
-                stream=True,
-                timeout=120,
-            )
+        CHAT_MODEL = "llama-3.1-8b-instant"
 
-            for line in response.iter_lines():
-                if not line:
+        tried = set()
+        success = False
+
+        while len(tried) < max(len(GROQ_KEYS), 1):
+            key = _get_key() or os.getenv("GROQ_API_KEY")
+            if not key:
+                yield f"data: {json.dumps({'type': 'token', 'payload': '❌ GROQ_API_KEY가 설정되지 않았어요.'})}\n\n"
+                break
+
+            if key in tried:
+                _rotate_key()
+                key = _get_key() or os.getenv("GROQ_API_KEY")
+            if key is None or key in tried:
+                break
+            tried.add(key)
+
+            try:
+                response = req_lib.post(
+                    GROQ_URL,
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": CHAT_MODEL,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": True,
+                        "temperature": 0.4,
+                        "max_tokens": 1500,
+                    },
+                    stream=True,
+                    timeout=120,
+                )
+
+                if _is_rate_limit(response.status_code, "" if response.ok else response.text):
+                    _rotate_key()
                     continue
-                line = line.decode("utf-8") if isinstance(line, bytes) else line
-                if line.startswith("data: "):
-                    chunk = line[6:]
-                    if chunk.strip() == "[DONE]":
-                        break
-                    try:
-                        data_chunk = _json.loads(chunk)
-                        token = data_chunk["choices"][0]["delta"].get("content", "")
-                        if token:
-                            yield f"data: {_json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
-                    except Exception:
-                        continue
 
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'token', 'payload': f'❌ 오류: {str(e)}'})}\n\n"
+                if not response.ok:
+                    yield f"data: {json.dumps({'type': 'token', 'payload': f'❌ Groq API 오류: {response.status_code}'})}\n\n"
+                    break
+
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    line = line.decode("utf-8") if isinstance(line, bytes) else line
+                    if line.startswith("data: "):
+                        chunk = line[6:]
+                        if chunk.strip() == "[DONE]":
+                            break
+                        try:
+                            data_chunk = _json.loads(chunk)
+                            token = data_chunk["choices"][0]["delta"].get("content", "")
+                            if token:
+                                yield f"data: {_json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
+                        except Exception:
+                            continue
+                success = True
+                break
+
+            except Exception as e:
+                err = str(e)
+                if "rate_limit" in err.lower() or "429" in err:
+                    _rotate_key()
+                    continue
+                yield f"data: {json.dumps({'type': 'token', 'payload': f'❌ 오류: {err}'})}\n\n"
+                break
+
+        if not success and not tried:
+            yield f"data: {json.dumps({'type': 'token', 'payload': '❌ 모든 API 키가 rate limit에 걸렸어요. 잠시 후 다시 시도해주세요.'})}\n\n"
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 

@@ -468,8 +468,14 @@ def build_prompt(data: dict) -> str:
 
     prompt += (
         f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"주의: 모든 수치는 데이터에서 직접 인용. 섹션 제목 유지.\n"
-        f"반드시 한국어로만 작성. You MUST respond in Korean only.\n"
+        f"[필수 준수 사항]\n"
+        f"1. 반드시 위 {section_count}개 섹션(## 1 ~ ## {section_count})을 모두 빠짐없이 작성하세요.\n"
+        f"2. 각 섹션 제목(## N. 제목)을 그대로 유지하세요.\n"
+        f"3. 모든 수치는 위 데이터에서 직접 인용하세요. 임의로 수치를 만들지 마세요.\n"
+        f"4. **예측 방향**: 상승 / 하락 / 보합 중 반드시 하나만 선택하세요.\n"
+        f"5. **예상 등락률**: 반드시 'X% ~ Y%' 형식으로 숫자 범위를 명시하세요.\n"
+        f"6. 분석 근거는 데이터 수치를 직접 언급하며 구체적으로 작성하세요.\n"
+        f"7. 반드시 한국어로만 작성하세요. You MUST respond in Korean only. Do NOT write in English.\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -501,7 +507,7 @@ def _call_groq_stream(prompt: str):
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": True,
                     "temperature": 0.3,
-                    "max_tokens": 2000,
+                    "max_tokens": 4000,
                 },
                 stream=True,
                 timeout=120,
@@ -580,7 +586,7 @@ def analyze(data: dict) -> str:
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
                     "temperature": 0.3,
-                    "max_tokens": 2000,
+                    "max_tokens": 4000,
                 },
                 timeout=120,
             )
