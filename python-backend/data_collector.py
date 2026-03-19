@@ -10,43 +10,114 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 
 def get_stock_data(ticker: str, period: str = "3mo"):
-    """주식 데이터 수집 (한국: 005930.KS, 미국: AAPL 등)"""
+    """주식 데이터 수집 — yfinance 실패 시 Alpha Vantage 폴백"""
+
+    # ── 1차: yfinance ─────────────────────────────────────────────
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(period=period)
-        info = stock.info
+        hist  = stock.history(period=period)
+        info  = stock.info
 
-        if hist.empty:
-            return {"error": f"'{ticker}' 티커를 찾을 수 없어요."}
+        if not hist.empty:
+            latest = hist.iloc[-1]
+            prev   = hist.iloc[-2] if len(hist) > 1 else latest
+            change     = latest["Close"] - prev["Close"]
+            change_pct = (change / prev["Close"]) * 100
 
-        latest = hist.iloc[-1]
-        prev = hist.iloc[-2] if len(hist) > 1 else latest
-
-        change = latest["Close"] - prev["Close"]
-        change_pct = (change / prev["Close"]) * 100
-
-        return {
-            "ticker": ticker,
-            "name": info.get("longName") or info.get("shortName") or ticker,
-            "current_price": round(float(latest["Close"]), 2),
-            "prev_price": round(float(prev["Close"]), 2),
-            "change": round(float(change), 2),
-            "change_pct": round(float(change_pct), 2),
-            "volume": int(latest["Volume"]),
-            "high_52w": round(float(info.get("fiftyTwoWeekHigh", 0)), 2),
-            "low_52w": round(float(info.get("fiftyTwoWeekLow", 0)), 2),
-            "history": [
-                {
-                    "date": str(idx.date()),
-                    "close": round(float(row["Close"]), 2),
-                    "volume": int(row["Volume"]),
-                }
-                for idx, row in hist.tail(30).iterrows()
-            ],
-        }
+            return {
+                "ticker": ticker,
+                "name": info.get("longName") or info.get("shortName") or ticker,
+                "current_price": round(float(latest["Close"]), 2),
+                "prev_price":    round(float(prev["Close"]), 2),
+                "change":        round(float(change), 2),
+                "change_pct":    round(float(change_pct), 2),
+                "volume":        int(latest["Volume"]),
+                "high_52w":      round(float(info.get("fiftyTwoWeekHigh", 0)), 2),
+                "low_52w":       round(float(info.get("fiftyTwoWeekLow", 0)), 2),
+                "history": [
+                    {
+                        "date":   str(idx.date()),
+                        "close":  round(float(row["Close"]), 2),
+                        "volume": int(row["Volume"]),
+                    }
+                    for idx, row in hist.tail(30).iterrows()
+                ],
+            }
     except Exception as e:
-        return {"error": str(e)}
+        print(f"  ⚠️  yfinance 실패: {e} → Alpha Vantage 시도")
 
+    # ── 2차: Alpha Vantage 폴백 ───────────────────────────────────
+    av_key = os.getenv("ALPHA_VANTAGE_KEY")
+    if not av_key:
+        return {"error": f"'{ticker}' 데이터를 가져올 수 없어요. (yfinance 차단, AV 키 없음)"}
+
+    try:
+        # 티커 변환 (한국: 005930.KS → 005930.KRX)
+        av_ticker = ticker
+        if ticker.endswith(".KS") or ticker.endswith(".KQ"):
+            av_ticker = ticker.split(".")[0] + ".KRX"
+        elif ticker.endswith(".T"):
+            av_ticker = ticker.split(".")[0] + ".TSE"
+
+        # 일별 주가
+        url = "https://www.alphavantage.co/query"
+        params = {
+            "function":   "TIME_SERIES_DAILY",
+            "symbol":     av_ticker,
+            "outputsize": "compact",  # 최근 100일
+            "apikey":     av_key,
+        }
+        resp = requests.get(url, params=params, timeout=15)
+        data = resp.json()
+
+        ts = data.get("Time Series (Daily)", {})
+        if not ts:
+            # 글로벌 쿼터 에러 확인
+            note = data.get("Note") or data.get("Information") or ""
+            if "call frequency" in note.lower() or "limit" in note.lower():
+                return {"error": "Alpha Vantage 일일 한도 초과. 내일 다시 시도해주세요."}
+            return {"error": f"Alpha Vantage에서 '{ticker}' 데이터를 찾을 수 없어요."}
+
+        dates   = sorted(ts.keys(), reverse=True)
+        latest_date = dates[0]
+        prev_date   = dates[1] if len(dates) > 1 else dates[0]
+
+        latest_close = float(ts[latest_date]["4. close"])
+        prev_close   = float(ts[prev_date]["4. close"])
+        change       = latest_close - prev_close
+        change_pct   = (change / prev_close) * 100
+
+        # 52주 고/저
+        year_dates  = dates[:252]
+        highs = [float(ts[d]["2. high"]) for d in year_dates]
+        lows  = [float(ts[d]["3. low"])  for d in year_dates]
+
+        # 최근 30일 히스토리
+        history = [
+            {
+                "date":   d,
+                "close":  round(float(ts[d]["4. close"]), 2),
+                "volume": int(float(ts[d]["5. volume"])),
+            }
+            for d in reversed(dates[:30])
+        ]
+
+        print(f"  ✅ Alpha Vantage 폴백 성공: {ticker}")
+        return {
+            "ticker":        ticker,
+            "name":          ticker,
+            "current_price": round(latest_close, 2),
+            "prev_price":    round(prev_close, 2),
+            "change":        round(change, 2),
+            "change_pct":    round(change_pct, 2),
+            "volume":        int(float(ts[latest_date]["5. volume"])),
+            "high_52w":      round(max(highs), 2),
+            "low_52w":       round(min(lows), 2),
+            "history":       history,
+        }
+
+    except Exception as e:
+        return {"error": f"데이터 수집 실패: {str(e)}"}
 
 def get_technicals(ticker: str):
     """RSI, MACD, 볼린저밴드, 이동평균 계산"""
@@ -708,6 +779,13 @@ def get_news(query: str, company_name: str = "", country: str = "한국", days: 
         ]
 
         # ── Groq 동적 쿼리 생성 ──────────────────────────────────
+        ollama_prompt = (
+            f"Today's market data:\n"
+            f"- KOSPI: {indicators.get('kospi', {}).get('price')}\n"
+            f"- USD/KRW: {indicators.get('usd_krw', {}).get('price')}\n"
+            f"Generate 3-5 short English news search queries about current global events "
+            f"affecting {en_company} stock. Return ONLY a JSON array of strings."
+        )
         dynamic_queries = []
         try:
             groq_key = os.getenv("GROQ_API_KEY_1") or os.getenv("GROQ_API_KEY_2") or os.getenv("GROQ_API_KEY_3")

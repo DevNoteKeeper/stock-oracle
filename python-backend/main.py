@@ -4,6 +4,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import os
 import json, re
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
 from datetime import datetime
 
 from data_collector import (
@@ -105,10 +108,11 @@ def health():
 
 @app.post("/collect")
 def collect_data(req: AnalyzeRequest):
-    """데이터 수집만 (AI 분석 없이)"""
     data = collect_all(req.ticker, req.company_name, req.country)
-    if "error" in data.get("stock", {}):
-        raise HTTPException(status_code=400, detail=data["stock"]["error"])
+    # stock 에러만 400 처리, financials 에러는 무시
+    stock = data.get("stock", {})
+    if isinstance(stock, dict) and "error" in stock:
+        raise HTTPException(status_code=400, detail=stock["error"])
     pos = _calc_position(req, float(data["stock"].get("current_price", 0)))
     if pos:
         data["position"] = pos
@@ -117,12 +121,21 @@ def collect_data(req: AnalyzeRequest):
 
 @app.post("/analyze")
 def analyze(req: AnalyzeRequest):
-    """데이터 수집 + AI 분석 스트리밍"""
+    print(f"=== /analyze 호출됨: {req.ticker} / {req.company_name} / {req.period} ===", flush=True)
 
     data = collect_all(req.ticker, req.company_name, req.country)
 
-    if "error" in data.get("stock", {}):
-        raise HTTPException(status_code=400, detail=data["stock"]["error"])
+    # 디버그: 각 항목 에러 확인
+    print(f"  stock error: {data.get('stock', {}).get('error')}")
+    print(f"  financials error: {data.get('financials', {}).get('reason')}")
+    print(f"  technicals error: {data.get('technicals', {}).get('reason')}")
+
+    stock_err = data.get("stock", {})
+    if isinstance(stock_err, dict) and "error" in stock_err:
+        err_msg = stock_err["error"]
+        if "rate" in err_msg.lower() or "too many" in err_msg.lower():
+            raise HTTPException(status_code=503, detail=err_msg)
+        raise HTTPException(status_code=400, detail=err_msg)
 
     # 포지션 계산 후 data에 추가
     pos = _calc_position(req, float(data["stock"].get("current_price", 0)))
@@ -130,35 +143,18 @@ def analyze(req: AnalyzeRequest):
         data["position"] = pos
     data["period"] = req.period
 
-    def stream_response():
+
+def stream_response():
         # 1. 수집 데이터 전송
         yield f"data: {json.dumps({'type': 'data', 'payload': data}, ensure_ascii=False)}\n\n"
 
         # 2. AI 분석 스트리밍
-        full_text  = []
-        try:
-            for token in analyze_stream(data):
-                full_text.append(token)
-                yield f"data: {json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            print(f"  ❌ analyze_stream 에러: {e}")
-            raise
-        has_error  = False
-        error_msg  = ""
-
+        full_text = []
         for token in analyze_stream(data):
-            # rate limit / 오류 토큰 감지
-            if token.startswith("❌") or token.startswith("⏳"):
-                has_error = token.startswith("❌")
-                error_msg = token
-                # ⏳ 대기 메시지는 progress로, ❌ 에러는 error로 전송
-                event_type = "error" if has_error else "progress"
-                yield f"data: {json.dumps({'type': event_type, 'payload': token}, ensure_ascii=False)}\n\n"
-                if has_error:
-                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                    return
-                continue
-
+            if token.startswith("❌"):
+                yield f"data: {json.dumps({'type': 'error', 'payload': token}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
             full_text.append(token)
             yield f"data: {json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
 
@@ -185,12 +181,11 @@ def analyze(req: AnalyzeRequest):
             pass
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-    return StreamingResponse(
-        stream_response(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+        return StreamingResponse(
+            stream_response(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
 
 def _parse_prediction(text: str, data: dict) -> dict | None:
