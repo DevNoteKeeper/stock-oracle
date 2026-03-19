@@ -707,39 +707,31 @@ def get_news(query: str, company_name: str = "", country: str = "한국", days: 
             ("Trump tariff policy executive order trade war", "트럼프"),
         ]
 
-        # ── Ollama 동적 쿼리 생성 ────────────────────────────────
+        # ── Groq 동적 쿼리 생성 ──────────────────────────────────
         dynamic_queries = []
         try:
-            import requests as req
-            ollama_prompt = (
-                f"Today's market data:\n"
-                f"- KOSPI: {indicators.get('kospi', {}).get('price')} ({indicators.get('kospi', {}).get('change_pct')}%)\n"
-                f"- USD/KRW: {indicators.get('usd_krw', {}).get('price')}\n"
-                f"- S&P500 futures: {indicators.get('sp500_futures', {}).get('change_pct')}%\n"
-                f"- Gold: {indicators.get('gold', {}).get('change_pct')}%\n\n"
-                f"You are a financial news analyst. Based on the market data above, "
-                f"identify the most important global events happening RIGHT NOW that could affect {en_company} stock. "
-                f"Generate between 3 to 10 short English news search queries (max 8 words each). "
-                f"Include: active wars, political crises, central bank decisions, trade disputes, "
-                f"sanctions, economic data releases, or any major market-moving event you know about. "
-                f"If markets are volatile (large moves), generate more queries. "
-                f"Return ONLY a JSON array of strings, nothing else. No explanation. "
-                f"Example: [\"Trump tariff announcement impact\", \"Fed rate decision march\", \"Gaza ceasefire update\"]"
-            )
-            ollama_resp = req.post(
-                "http://localhost:11434/api/generate",
-                json={"model": "qwen2.5:14b", "prompt": ollama_prompt, "stream": False,
-                      "options": {"temperature": 0.3, "num_predict": 200}},
-                timeout=30,
-            )
-            if ollama_resp.status_code == 200:
-                import json as _json, re as _re
-                raw = ollama_resp.json().get("response", "")
-                match = _re.search(r'\[.*?\]', raw, _re.DOTALL)
-                if match:
-                    queries = _json.loads(match.group())
-                    dynamic_queries = [(q, "AI동적") for q in queries if isinstance(q, str)]
-                    print(f"  🤖 AI 동적 쿼리 {len(dynamic_queries)}개 생성: {[q for q,_ in dynamic_queries]}")
+            groq_key = os.getenv("GROQ_API_KEY_1") or os.getenv("GROQ_API_KEY_2") or os.getenv("GROQ_API_KEY_3")
+            if groq_key:
+                dq_resp = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "llama-3.1-8b-instant",
+                        "messages": [{"role": "user", "content": ollama_prompt}],
+                        "stream": False,
+                        "temperature": 0.3,
+                        "max_tokens": 200,
+                    },
+                    timeout=15,
+                )
+                if dq_resp.status_code == 200:
+                    raw = dq_resp.json()["choices"][0]["message"]["content"]
+                    import re as _re, json as _json
+                    match = _re.search(r'\[.*?\]', raw, _re.DOTALL)
+                    if match:
+                        queries = _json.loads(match.group())
+                        dynamic_queries = [(q, "AI동적") for q in queries if isinstance(q, str)]
+                        print(f"  🤖 AI 동적 쿼리 {len(dynamic_queries)}개 생성")
         except Exception as e:
             print(f"  ⚠️  AI 동적 쿼리 생성 실패: {e}")
 

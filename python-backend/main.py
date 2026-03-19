@@ -136,6 +136,13 @@ def analyze(req: AnalyzeRequest):
 
         # 2. AI 분석 스트리밍
         full_text  = []
+        try:
+            for token in analyze_stream(data):
+                full_text.append(token)
+                yield f"data: {json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            print(f"  ❌ analyze_stream 에러: {e}")
+            raise
         has_error  = False
         error_msg  = ""
 

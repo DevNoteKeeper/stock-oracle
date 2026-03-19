@@ -285,7 +285,7 @@ export default function App() {
     check();
   }, []);
 
-  const handleAnalyze = async (ticker: string, companyName: string, country: string, position?: PositionInfo) => {
+  const handleAnalyze = async (ticker: string, companyName: string, country: string, position?: PositionInfo, period?: string) => {
     setAppState("analyzing");
     setStockData(null);
     setAnalysisText("");
@@ -295,7 +295,7 @@ export default function App() {
       const response = await fetch(`${API_BASE}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker, company_name: companyName, country, position }),
+        body: JSON.stringify({ ticker, company_name: companyName, country, position, period: period || "tomorrow" }),
       });
 
       if (!response.ok) {
