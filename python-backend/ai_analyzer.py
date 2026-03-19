@@ -685,7 +685,7 @@ def _call_groq_stream(prompt: str):
         yield "❌ GROQ_API_KEY가 설정되지 않았어요. .env 파일을 확인해주세요."
         return
 
-    WAIT_SECONDS = [15, 30]  # 1차 15초, 2차 30초 대기 후 재시도
+    WAIT_SECONDS = [15, 30]
 
     for retry in range(len(WAIT_SECONDS) + 1):
         tried = set()
@@ -713,28 +713,66 @@ def _call_groq_stream(prompt: str):
                     timeout=120,
                 )
 
-                if _is_rate_limit(response.status_code, "" if response.ok else response.text):
-                    print(f"  ⚠️  키 {GROQ_KEYS.index(key)+1} rate limited → 다음 키로 전환")
+                # HTTP 레벨 rate limit (429)
+                if response.status_code == 429:
+                    print(f"  ⚠️  키 {GROQ_KEYS.index(key)+1} HTTP 429 → 다음 키로 전환")
                     _rotate_key()
                     time.sleep(2)
                     continue
 
                 if not response.ok:
+                    err_text = ""
+                    try:
+                        err_text = response.text
+                    except Exception:
+                        pass
+                    if _is_rate_limit(response.status_code, err_text):
+                        print(f"  ⚠️  키 {GROQ_KEYS.index(key)+1} rate limited → 다음 키로 전환")
+                        _rotate_key()
+                        time.sleep(2)
+                        continue
                     yield f"❌ Groq API 오류: {response.status_code}"
                     return
 
+                # 스트림 레벨 rate limit 감지
+                rate_limited = False
                 for line in response.iter_lines():
-                    if not line: continue
+                    if not line:
+                        continue
                     line = line.decode("utf-8") if isinstance(line, bytes) else line
-                    if line.startswith("data: "):
-                        chunk = line[6:]
-                        if chunk.strip() == "[DONE]": return
-                        try:
-                            d     = json.loads(chunk)
-                            token = d["choices"][0]["delta"].get("content", "")
-                            if token: yield token
-                        except Exception:
-                            continue
+                    if not line.startswith("data: "):
+                        continue
+                    chunk = line[6:]
+                    if chunk.strip() == "[DONE]":
+                        return
+
+                    try:
+                        d = json.loads(chunk)
+
+                        # 스트림 안에 error 객체가 담겨온 경우
+                        if "error" in d:
+                            err_type = d["error"].get("type", "")
+                            err_msg  = d["error"].get("message", "")
+                            if "rate_limit" in err_type or "rate_limit" in err_msg.lower() or "429" in err_msg:
+                                print(f"  ⚠️  키 {GROQ_KEYS.index(key)+1} 스트림 rate limit → 다음 키로 전환")
+                                _rotate_key()
+                                time.sleep(2)
+                                rate_limited = True
+                                break
+                            else:
+                                yield f"❌ Groq 오류: {err_msg}"
+                                return
+
+                        token = d.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if token:
+                            yield token
+
+                    except json.JSONDecodeError:
+                        continue
+
+                if rate_limited:
+                    continue  # 다음 키로 재시도
+
                 return  # 정상 완료
 
             except requests.exceptions.ConnectionError:
@@ -758,7 +796,6 @@ def _call_groq_stream(prompt: str):
             print(f"  ⏳ 모든 키 rate limit — {wait}초 대기 후 재시도 ({retry+1}/{len(WAIT_SECONDS)})...")
             yield f"⏳ API 요청 한도 초과. {wait}초 후 자동 재시도합니다...\n"
             time.sleep(wait)
-            # 키 인덱스 리셋해서 처음부터 다시 시도
             global _key_index
             _key_index = 0
         else:
