@@ -148,7 +148,7 @@ def build_prompt(data: dict) -> str:
 
     # ── 뉴스 블록 ─────────────────────────────────────────────────
     news_block = ""
-    articles   = news.get("articles", [])[:12]
+    articles   = news.get("articles", [])[:8]
     sentiment  = news.get("sentiment_summary", {})
     cat_counts = news.get("category_counts", {})
     top_kw     = news.get("top_keywords", [])
@@ -501,7 +501,7 @@ def _call_groq_stream(prompt: str):
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": True,
                     "temperature": 0.3,
-                    "max_tokens": 4000,
+                    "max_tokens": 2000,
                 },
                 stream=True,
                 timeout=120,
@@ -580,7 +580,7 @@ def analyze(data: dict) -> str:
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
                     "temperature": 0.3,
-                    "max_tokens": 4000,
+                    "max_tokens": 2000,
                 },
                 timeout=120,
             )
