@@ -2,6 +2,7 @@ import requests
 import json
 import os
 import time
+import random
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,6 +26,17 @@ def _load_groq_keys() -> list:
 GROQ_KEYS = _load_groq_keys()
 _key_index = 0   # 현재 사용 중인 키 인덱스
 
+_keys=[
+    os.getenv("GROQ_API_KEY_1"),
+    os.getenv("GROQ_API_KEY_2"),
+    os.getenv("GROQ_API_KEY_3"),
+]
+
+_keys=[k for k in _keys if k] # remove None
+
+def get_groq_key():
+    """랜덤으로 키 선택"""
+    return random.choice(_keys) if _keys else None
 def _next_key() -> str | None:
     """다음 키로 로테이션"""
     global _key_index
@@ -196,7 +208,7 @@ def analyze_stream(data: dict):
             response = requests.post(
                 GROQ_URL,
                 headers={
-                    "Authorization": f"Bearer {key}",
+                    "Authorization": f"Bearer {get_groq_key()}",
                     "Content-Type": "application/json",
                 },
                 json={
