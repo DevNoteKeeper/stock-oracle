@@ -135,8 +135,23 @@ def analyze(req: AnalyzeRequest):
         yield f"data: {json.dumps({'type': 'data', 'payload': data}, ensure_ascii=False)}\n\n"
 
         # 2. AI 분석 스트리밍
-        full_text = []
+        full_text  = []
+        has_error  = False
+        error_msg  = ""
+
         for token in analyze_stream(data):
+            # rate limit / 오류 토큰 감지
+            if token.startswith("❌") or token.startswith("⏳"):
+                has_error = token.startswith("❌")
+                error_msg = token
+                # ⏳ 대기 메시지는 progress로, ❌ 에러는 error로 전송
+                event_type = "error" if has_error else "progress"
+                yield f"data: {json.dumps({'type': event_type, 'payload': token}, ensure_ascii=False)}\n\n"
+                if has_error:
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    return
+                continue
+
             full_text.append(token)
             yield f"data: {json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
 
@@ -177,6 +192,7 @@ def _parse_prediction(text: str, data: dict) -> dict | None:
         if not dir_match:
             dir_match = re.search(r"(?:방향|Direction)\s*[:：]\s*(상승|하락|보합)", text)
         direction = dir_match.group(1) if dir_match else None
+
         rng_match = re.search(
             r"\*{0,2}예상\s*등락률\*{0,2}\s*[:：][^\n]*?([+-]?\d+\.?\d*)\s*%\s*[~～·∼]\s*([+-]?\d+\.?\d*)\s*%",
             text,
