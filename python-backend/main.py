@@ -173,12 +173,19 @@ def analyze(req: AnalyzeRequest):
 
 def _parse_prediction(text: str, data: dict) -> dict | None:
     try:
-        dir_match = re.search(r"\*\*예측 방향\*\*[:：]\s*(상승|하락|보합)", text)
+        dir_match = re.search(r"\*{0,2}예측\s*방향\*{0,2}\s*[:：]\s*(상승|하락|보합)", text)
+        if not dir_match:
+            dir_match = re.search(r"(?:방향|Direction)\s*[:：]\s*(상승|하락|보합)", text)
         direction = dir_match.group(1) if dir_match else None
         rng_match = re.search(
-            r"\*\*예상 등락률\*\*[:：]\s*([+-]?\d+\.?\d*)\s*%\s*[~～]\s*([+-]?\d+\.?\d*)\s*%",
+            r"\*{0,2}예상\s*등락률\*{0,2}\s*[:：][^\n]*?([+-]?\d+\.?\d*)\s*%\s*[~～·∼]\s*([+-]?\d+\.?\d*)\s*%",
             text,
         )
+        if not rng_match:
+            rng_match = re.search(
+                r"(?:등락률|변동률|예상\s*범위)\s*[:：][^\n]*?([+-]?\d+\.?\d*)\s*%\s*[~～·∼]\s*([+-]?\d+\.?\d*)\s*%",
+                text,
+            )
         if not direction or not rng_match:
             return None
         low  = float(rng_match.group(1))

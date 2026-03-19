@@ -358,6 +358,150 @@ def build_prompt(data: dict) -> str:
             "\n💡 【월요일】 주말 변수가 시가에 반영됐을 수 있음. 갭 이후 방향성 주목.\n"
         )
 
+    # ── ATR 기반 현실적 등락률 범위 사전 계산 ───────────────────────
+    # LLM이 근거 없이 넓은 범위를 쓰는 것을 방지 — 통계 기반 범위를 앵커로 제공
+    atr_block = ""
+    if len(history) >= 10:
+        # 최근 10일 일봉 등락률 절대값 평균 (ATR 근사)
+        daily_changes = [
+            abs((history[i]["close"] - history[i-1]["close"]) / history[i-1]["close"] * 100)
+            for i in range(1, len(history))
+        ]
+        atr_pct = round(sum(daily_changes[-10:]) / min(10, len(daily_changes)), 2)
+
+        # 최근 5일 방향성 (단순 추세)
+        closes5  = [d["close"] for d in history[-5:]]
+        chg5     = round((closes5[-1] - closes5[0]) / closes5[0] * 100, 2)
+        up_days  = sum(1 for i in range(1, len(closes5)) if closes5[i] > closes5[i-1])
+        dn_days  = len(closes5) - 1 - up_days
+
+        # 추세 중립 표현 (방향 유도 없이 사실만)
+        trend_desc = f"상승 {up_days}일 / 하락 {dn_days}일, 누적 {chg5:+.2f}%"
+
+        atr_block = (
+            f"\n📐 통계 기반 참고 범위 (반드시 이 범위 안에서 예상 등락률을 제시하세요)\n"
+            f"  - 최근 10일 평균 일간 변동폭(ATR): ±{atr_pct:.2f}%\n"
+            f"  - 예상 등락률 권장 범위: -{atr_pct*1.2:.1f}% ~ +{atr_pct*1.2:.1f}% 이내\n"
+            f"  - 최근 5일 추세: {trend_desc}\n"
+            f"  ※ ATR의 2배 이상 범위(-{atr_pct*2:.1f}% 미만 또는 +{atr_pct*2:.1f}% 초과)는 "
+            f"특별한 이벤트 없이는 쓰지 마세요.\n"
+        )
+
+    # ── 신호 카운터: 기술지표 + 시장지표를 코드로 점수화 ────────────
+    up_signals   = []
+    down_signals = []
+
+    # 1. RSI
+    rsi_val = tech.get("rsi") if tech.get("available") else None
+    if rsi_val is not None:
+        if rsi_val >= 60:
+            up_signals.append(f"RSI {rsi_val} (강세)")
+        elif rsi_val <= 40:
+            down_signals.append(f"RSI {rsi_val} (약세/과매도)")
+
+    # 2. MACD 히스토그램 방향
+    hist_val = tech.get("histogram") if tech.get("available") else None
+    if hist_val is not None:
+        if hist_val > 0:
+            up_signals.append(f"MACD 히스토그램 양수({round(hist_val,1)}) → 매수압력")
+        else:
+            down_signals.append(f"MACD 히스토그램 음수({round(hist_val,1)}) → 매도압력")
+
+    # 3. MA 배열 (현재가 vs MA5/MA20/MA60)
+    ma5_val  = tech.get("ma5")  if tech.get("available") else None
+    ma20_val = tech.get("ma20") if tech.get("available") else None
+    ma60_val = tech.get("ma60") if tech.get("available") else None
+    if ma5_val and cur > ma5_val:
+        up_signals.append(f"현재가 > MA5({ma5_val:,.0f})")
+    elif ma5_val and cur < ma5_val:
+        down_signals.append(f"현재가 < MA5({ma5_val:,.0f})")
+    if ma20_val and cur > ma20_val:
+        up_signals.append(f"현재가 > MA20({ma20_val:,.0f})")
+    elif ma20_val and cur < ma20_val:
+        down_signals.append(f"현재가 < MA20({ma20_val:,.0f})")
+    if ma60_val and cur > ma60_val:
+        up_signals.append(f"현재가 > MA60({ma60_val:,.0f})")
+    elif ma60_val and cur < ma60_val:
+        down_signals.append(f"현재가 < MA60({ma60_val:,.0f})")
+
+    # 4. 볼린저밴드 %B
+    bb_val = tech.get("bb_pct_b") if tech.get("available") else None
+    if bb_val is not None:
+        if bb_val >= 0.7:
+            up_signals.append(f"볼린저 %B {round(bb_val*100,1)}% (상단 근접)")
+        elif bb_val <= 0.3:
+            down_signals.append(f"볼린저 %B {round(bb_val*100,1)}% (하단 근접)")
+
+    # 5. 코스피 등락
+    if kospi_pct >= 1.0:
+        up_signals.append(f"코스피 {kospi_pct:+.2f}% (강세)")
+    elif kospi_pct <= -1.0:
+        down_signals.append(f"코스피 {kospi_pct:+.2f}% (약세)")
+
+    # 6. S&P500 선물
+    if sp500_pct >= 1.0:
+        up_signals.append(f"S&P500선물 {sp500_pct:+.2f}% (강세)")
+    elif sp500_pct <= -1.0:
+        down_signals.append(f"S&P500선물 {sp500_pct:+.2f}% (약세)")
+
+    # 7. 달러/원 (강달러 → 외국인 매도)
+    if usd_pct >= 0.5:
+        down_signals.append(f"달러/원 {usd_pct:+.2f}% (강달러→외국인매도)")
+    elif usd_pct <= -0.5:
+        up_signals.append(f"달러/원 {usd_pct:+.2f}% (약달러→외국인매수)")
+
+    # 8. 최근 5일 추세
+    if len(history) >= 5:
+        closes5 = [d["close"] for d in history[-5:]]
+        chg5    = (closes5[-1] - closes5[0]) / closes5[0] * 100
+        if chg5 >= 2.0:
+            up_signals.append(f"5일 누적 {chg5:+.2f}% (상승추세)")
+        elif chg5 <= -2.0:
+            down_signals.append(f"5일 누적 {chg5:+.2f}% (하락추세)")
+
+    # 9. 외국인/기관 수급
+    inv = data.get("investor_trading", {})
+    if inv.get("available"):
+        s = inv.get("5day_summary", {})
+        fn = s.get("foreign_net", 0)
+        inst = s.get("institution_net", 0)
+        if fn > 0:
+            up_signals.append(f"외국인 5일 순매수 +{fn:,}주")
+        elif fn < 0:
+            down_signals.append(f"외국인 5일 순매도 {fn:,}주")
+        if inst > 0:
+            up_signals.append(f"기관 5일 순매수 +{inst:,}주")
+        elif inst < 0:
+            down_signals.append(f"기관 5일 순매도 {inst:,}주")
+
+    # ── 종합 판정 ─────────────────────────────────────────────────
+    n_up   = len(up_signals)
+    n_down = len(down_signals)
+    score  = n_up - n_down  # 양수=상승우세, 음수=하락우세
+
+    if score >= 3:
+        verdict = f"🟢 상승 우세 (상승신호 {n_up}개 vs 하락신호 {n_down}개) → '상승' 예측 강력 권고"
+    elif score <= -3:
+        verdict = f"🔴 하락 우세 (하락신호 {n_down}개 vs 상승신호 {n_up}개) → '하락' 예측 강력 권고"
+    elif score >= 1:
+        verdict = f"🟡 상승 약우세 (상승신호 {n_up}개 vs 하락신호 {n_down}개) → '보합' 또는 '상승' 검토"
+    elif score <= -1:
+        verdict = f"🟡 하락 약우세 (하락신호 {n_down}개 vs 상승신호 {n_up}개) → '보합' 또는 '하락' 검토"
+    else:
+        verdict = f"⚪ 신호 균형 (상승 {n_up}개 = 하락 {n_down}개) → '보합' 예측 권고"
+
+    signal_lines = []
+    if up_signals:
+        signal_lines.append(f"  📈 상승 신호 ({n_up}개): " + " / ".join(up_signals))
+    if down_signals:
+        signal_lines.append(f"  📉 하락 신호 ({n_down}개): " + " / ".join(down_signals))
+    signal_lines.append(f"  ▶ 종합: {verdict}")
+
+    signal_counter_block = (
+        f"\n🔢 사전 신호 집계 (코드 자동 산출 — 반드시 참고하세요)\n"
+        + "\n".join(signal_lines) + "\n"
+    )
+
     # ── 예측 기간 레이블 ──────────────────────────────────────────
     period_label = {"tomorrow": "내일 (1거래일)", "week": "1주일 (5거래일)", "month": "1개월 (20거래일)"}.get(period, "내일")
     section_count = "11개" if pos else "10개"
@@ -365,11 +509,15 @@ def build_prompt(data: dict) -> str:
     # ── 프롬프트 조합 ─────────────────────────────────────────────
     prompt = (
         f"당신은 국내 증권사 15년 경력 수석 애널리스트입니다.\n"
-        f"제공된 실제 시장 데이터만을 근거로 분석하세요. 반드시 수치를 인용하세요.\n\n"
+        f"제공된 실제 시장 데이터만을 근거로 분석하세요. 반드시 수치를 인용하세요.\n"
+        f"【중요】아래 '사전 신호 집계'의 종합 판정을 반드시 따르세요. "
+        f"신호가 혼조적이거나 약하면 반드시 '보합'으로 예측하세요.\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"■ 분석 대상: {company_name} ({country} / {ticker})\n"
         f"■ 예측 기간: {period_label}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{atr_block}"
+        f"{signal_counter_block}"
         f"▶ 현재 주가\n"
         f"  현재가:{cur:,.0f}원 / 전일대비:{stock.get('change'):+,.0f}원({fmt_pct(stock.get('change_pct'))})\n"
         f"  52주:{low:,.0f}~{high:,.0f}원 (현재위치 {w52_pct:.1f}% → {w52_label})\n"
@@ -418,8 +566,10 @@ def build_prompt(data: dict) -> str:
         prompt += (
             f"## 8. 내일 주가 예측\n"
             f"**예측 방향**: 상승 / 하락 / 보합 중 택1\n"
-            f"**예상 등락률**: XX% ~ XX%\n"
-            f"**예측 근거**: 1. 2. 3.\n"
+            f"  ※ 위 '사전 신호 집계' 종합 판정을 최우선 근거로 사용하세요.\n"
+            f"  ※ 판정이 '강력 권고'면 해당 방향, '검토'면 추가 지표 확인 후 결정.\n"
+            f"**예상 등락률**: 위 ATR 권장 범위 내에서 XX% ~ XX%\n"
+            f"**예측 근거**: 1. 2. 3. (신호 카운터 항목 직접 인용)\n"
             f"**핵심 가정**: 내일 유지되어야 할 조건\n\n"
             f"## 9. 매수 타이밍 분석\n"
             f"단기진입조건/목표가/손절가, 중기 상승·하락 시나리오, 핵심 트리거 이벤트\n\n"
@@ -472,8 +622,12 @@ def build_prompt(data: dict) -> str:
         f"1. 반드시 위 {section_count}개 섹션(## 1 ~ ## {section_count})을 모두 빠짐없이 작성하세요.\n"
         f"2. 각 섹션 제목(## N. 제목)을 그대로 유지하세요.\n"
         f"3. 모든 수치는 위 데이터에서 직접 인용하세요. 임의로 수치를 만들지 마세요.\n"
-        f"4. **예측 방향**: 상승 / 하락 / 보합 중 반드시 하나만 선택하세요.\n"
-        f"5. **예상 등락률**: 반드시 'X% ~ Y%' 형식으로 숫자 범위를 명시하세요.\n"
+        f"4. **예측 방향** 규칙:\n"
+        f"   - '상승': RSI 상승+MACD 골든크로스+거래량 증가 등 명확한 상승 신호 3개 이상일 때만\n"
+        f"   - '하락': 명확한 하락 신호 3개 이상일 때만\n"
+        f"   - 그 외 모든 경우(신호 혼조, 약한 신호, 불확실): 반드시 '보합'\n"
+        f"5. **예상 등락률**: 위에 제시된 ATR 권장 범위를 반드시 준수하세요.\n"
+        f"   - ATR 2배 이상의 범위는 절대 쓰지 마세요.\n"
         f"6. 분석 근거는 데이터 수치를 직접 언급하며 구체적으로 작성하세요.\n"
         f"7. 반드시 한국어로만 작성하세요. You MUST respond in Korean only. Do NOT write in English.\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
