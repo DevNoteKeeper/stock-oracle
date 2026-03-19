@@ -37,6 +37,13 @@ from pathlib import Path
 import requests as req_lib
 import yfinance as yf
 
+# Firebase 메모리 (없어도 동작)
+try:
+    from firebase_memory import get_memory as _get_memory
+    _firebase_available = True
+except ImportError:
+    _firebase_available = False
+
 
 # ── 날짜 유틸 ─────────────────────────────────────────────────────────
 
@@ -573,6 +580,16 @@ def main():
     print(f"   기간: {args.start} ~ {args.end}  |  {len(test_days)}개 영업일  |  간격: {args.interval}일")
     print(f"   AI 호출 간격: {args.sleep}초\n")
 
+    # ── Firebase 초기화 ───────────────────────────────────────────
+    mem = None
+    if _firebase_available and not args.no_ai:
+        try:
+            mem = _get_memory()
+            if not mem.enabled:
+                mem = None
+        except Exception:
+            mem = None
+
     results = []
 
     for i, day in enumerate(test_days, 1):
@@ -605,7 +622,7 @@ def main():
                 print(f"    📌 예측: {pred['direction']} ({pred['pct_low']:+.1f}% ~ {pred['pct_high']:+.1f}%){tag}")
             else:
                 print(f"    ⚠️  예측 파싱 실패")
-            time.sleep(args.sleep)  # 호출 간 기본 대기
+            time.sleep(args.sleep)
 
         actual = get_actual_next_price(args.ticker, day)
         ev     = None
@@ -625,9 +642,14 @@ def main():
             "actual":          actual,
             "eval":            ev,
             "override_reason": override_reason,
-            "collected_data":  data,        # 자기분석용 (저장 시 제외)
+            "collected_data":  data,
             "ai_response":     ai_text[:500] if ai_text else None,
         })
+
+        # 예측 기록 Firebase 저장 (맞든 틀리든)
+        if mem and ev:
+            mem.save_prediction_record(args.ticker, results[-1])
+
         print()
 
     # ── 결과 저장 (누적) ──────────────────────────────────────────
@@ -635,7 +657,12 @@ def main():
     existing = {"tests": []}
     if out_path.exists():
         try:
-            existing = json.loads(out_path.read_text(encoding="utf-8"))
+            loaded = json.loads(out_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                # 구 형식(리스트) → 새 형식으로 마이그레이션
+                existing = {"tests": [{"test_id": 1, "run_at": "", "ticker": "", "name": "", "period": "", "results": loaded}]}
+            elif isinstance(loaded, dict):
+                existing = loaded
         except Exception:
             pass
 
@@ -666,6 +693,11 @@ def main():
                 review = run_self_review(r)
                 reviews[r["as_of"]] = review
                 print(f"  → {review[:80]}...")
+
+                # Firebase에 실패 패턴 저장
+                if mem:
+                    mem.save_failure(args.ticker, r, review)
+
                 time.sleep(args.sleep)
             print()
 

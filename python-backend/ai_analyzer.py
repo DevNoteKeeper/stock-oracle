@@ -527,6 +527,23 @@ def build_prompt(data: dict) -> str:
 
     signal_counter_block += range_hint
 
+    # ── Firebase 학습 메모리 주입 ─────────────────────────────────
+    memory_block = ""
+    try:
+        from firebase_memory import get_memory
+        mem = get_memory()
+        if mem.enabled:
+            current_signals = {
+                "rsi":       tech.get("rsi") if tech.get("available") else None,
+                "macd_hist": tech.get("histogram") if tech.get("available") else None,
+                "kospi_pct": kospi_pct,
+                "sp500_pct": sp500_pct,
+                "usd_pct":   usd_pct,
+            }
+            memory_block = mem.build_memory_block(ticker, current_signals)
+    except Exception:
+        pass  # Firebase 없어도 정상 동작
+
     # ── 예측 기간 레이블 ──────────────────────────────────────────
     period_label = {"tomorrow": "내일 (1거래일)", "week": "1주일 (5거래일)", "month": "1개월 (20거래일)"}.get(period, "내일")
     section_count = "11개" if pos else "10개"
@@ -543,6 +560,7 @@ def build_prompt(data: dict) -> str:
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{atr_block}"
         f"{signal_counter_block}"
+        f"{memory_block}"
         f"▶ 현재 주가\n"
         f"  현재가:{cur:,.0f}원 / 전일대비:{stock.get('change'):+,.0f}원({fmt_pct(stock.get('change_pct'))})\n"
         f"  52주:{low:,.0f}~{high:,.0f}원 (현재위치 {w52_pct:.1f}% → {w52_label})\n"
