@@ -7,12 +7,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 # ── 키 목록 로드 ──────────────────────────────────────────────────
 def _load_groq_keys() -> list:
     keys = []
-    for i in range(1, 10):
+    for i in range(1, 4):
         k = os.getenv(f"GROQ_API_KEY_{i}")
         if k and k.strip():
             keys.append(k.strip())
