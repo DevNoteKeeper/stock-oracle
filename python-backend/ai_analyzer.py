@@ -360,32 +360,26 @@ def build_prompt(data: dict) -> str:
         )
 
     # ── ATR 기반 현실적 등락률 범위 사전 계산 ───────────────────────
-    # LLM이 근거 없이 넓은 범위를 쓰는 것을 방지 — 통계 기반 범위를 앵커로 제공
     atr_block = ""
+    atr_pct   = None
     if len(history) >= 10:
-        # 최근 10일 일봉 등락률 절대값 평균 (ATR 근사)
         daily_changes = [
             abs((history[i]["close"] - history[i-1]["close"]) / history[i-1]["close"] * 100)
             for i in range(1, len(history))
         ]
         atr_pct = round(sum(daily_changes[-10:]) / min(10, len(daily_changes)), 2)
 
-        # 최근 5일 방향성 (단순 추세)
-        closes5  = [d["close"] for d in history[-5:]]
-        chg5     = round((closes5[-1] - closes5[0]) / closes5[0] * 100, 2)
-        up_days  = sum(1 for i in range(1, len(closes5)) if closes5[i] > closes5[i-1])
-        dn_days  = len(closes5) - 1 - up_days
-
-        # 추세 중립 표현 (방향 유도 없이 사실만)
+        closes5    = [d["close"] for d in history[-5:]]
+        chg5       = round((closes5[-1] - closes5[0]) / closes5[0] * 100, 2)
+        up_days    = sum(1 for i in range(1, len(closes5)) if closes5[i] > closes5[i-1])
+        dn_days    = len(closes5) - 1 - up_days
         trend_desc = f"상승 {up_days}일 / 하락 {dn_days}일, 누적 {chg5:+.2f}%"
 
         atr_block = (
-            f"\n📐 통계 기반 참고 범위 (반드시 이 범위 안에서 예상 등락률을 제시하세요)\n"
+            f"\n📐 통계 기반 참고 범위\n"
             f"  - 최근 10일 평균 일간 변동폭(ATR): ±{atr_pct:.2f}%\n"
-            f"  - 예상 등락률 권장 범위: -{atr_pct*1.2:.1f}% ~ +{atr_pct*1.2:.1f}% 이내\n"
             f"  - 최근 5일 추세: {trend_desc}\n"
-            f"  ※ ATR의 2배 이상 범위(-{atr_pct*2:.1f}% 미만 또는 +{atr_pct*2:.1f}% 초과)는 "
-            f"특별한 이벤트 없이는 쓰지 마세요.\n"
+            f"  ※ ATR의 2배 이상 범위는 특별한 이벤트 없이는 쓰지 마세요.\n"
         )
 
     # ── 신호 카운터: 기술지표 + 시장지표를 코드로 점수화 ────────────
@@ -502,6 +496,36 @@ def build_prompt(data: dict) -> str:
         f"\n🔢 사전 신호 집계 (코드 자동 산출 — 반드시 참고하세요)\n"
         + "\n".join(signal_lines) + "\n"
     )
+
+    # ── 방향별 비대칭 범위 힌트 ───────────────────────────────────
+    # 상승 예측 시 범위를 양수 쪽으로, 하락 예측 시 음수 쪽으로 shift
+    range_hint = ""
+    if atr_pct:
+        if score >= 3:
+            # 상승 강력: 하단을 ATR*0.3으로 좁히고 상단을 ATR*2로 열기
+            r_low  = round(atr_pct * 0.3, 1)
+            r_high = round(atr_pct * 2.0, 1)
+            range_hint = (
+                f"\n📏 방향별 권장 등락률 범위\n"
+                f"  상승 예측 시: +{r_low}% ~ +{r_high}% (하락 가능성 낮으므로 상단 확장)\n"
+                f"  ※ 상승 예측인데 범위를 대칭(-X%~+X%)으로 쓰지 마세요.\n"
+            )
+        elif score <= -3:
+            r_low  = round(atr_pct * 2.0, 1)
+            r_high = round(atr_pct * 0.3, 1)
+            range_hint = (
+                f"\n📏 방향별 권장 등락률 범위\n"
+                f"  하락 예측 시: -{r_low}% ~ -{r_high}% (상승 가능성 낮으므로 하단 확장)\n"
+                f"  ※ 하락 예측인데 범위를 대칭(-X%~+X%)으로 쓰지 마세요.\n"
+            )
+        else:
+            r = round(atr_pct * 1.2, 1)
+            range_hint = (
+                f"\n📏 방향별 권장 등락률 범위\n"
+                f"  보합 예측 시: -{r}% ~ +{r}% (대칭 범위 사용)\n"
+            )
+
+    signal_counter_block += range_hint
 
     # ── 예측 기간 레이블 ──────────────────────────────────────────
     period_label = {"tomorrow": "내일 (1거래일)", "week": "1주일 (5거래일)", "month": "1개월 (20거래일)"}.get(period, "내일")
@@ -671,7 +695,7 @@ def _call_groq_stream(prompt: str):
             if _is_rate_limit(response.status_code, "" if response.ok else response.text):
                 print(f"  ⚠️  키 {GROQ_KEYS.index(key)+1} rate limited → 다음 키로 전환")
                 _rotate_key()
-                time.sleep(0.5)
+                time.sleep(2)
                 continue
 
             if not response.ok:
