@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-yfinance
+yfinance>=0.2.54
 beautifulsoup4
 lxml
 requests
