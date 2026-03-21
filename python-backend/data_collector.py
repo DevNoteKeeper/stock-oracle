@@ -14,12 +14,8 @@ def get_stock_data(ticker: str, period: str = "3mo"):
 
     # ── 1차: yfinance ─────────────────────────────────────────────
     try:
-        print(f"  🔍 yfinance 시도: {ticker}", flush=True)
-        import yfinance as yf
-        print(f"  🔍 yfinance 버전: {yf.__version__}", flush=True)
         stock = yf.Ticker(ticker)
         hist  = stock.history(period=period)
-        info  = stock.info
 
         if not hist.empty:
             latest = hist.iloc[-1]
@@ -27,16 +23,27 @@ def get_stock_data(ticker: str, period: str = "3mo"):
             change     = latest["Close"] - prev["Close"]
             change_pct = (change / prev["Close"]) * 100
 
+            # info는 실패해도 hist에서 대체
+            try:
+                info     = stock.info
+                name     = info.get("longName") or info.get("shortName") or ticker
+                high_52w = round(float(info.get("fiftyTwoWeekHigh", 0)), 2)
+                low_52w  = round(float(info.get("fiftyTwoWeekLow", 0)), 2)
+            except Exception:
+                name     = ticker
+                high_52w = round(float(hist["High"].max()), 2)
+                low_52w  = round(float(hist["Low"].min()), 2)
+
             return {
-                "ticker": ticker,
-                "name": info.get("longName") or info.get("shortName") or ticker,
+                "ticker":        ticker,
+                "name":          name,
                 "current_price": round(float(latest["Close"]), 2),
                 "prev_price":    round(float(prev["Close"]), 2),
                 "change":        round(float(change), 2),
                 "change_pct":    round(float(change_pct), 2),
                 "volume":        int(latest["Volume"]),
-                "high_52w":      round(float(info.get("fiftyTwoWeekHigh", 0)), 2),
-                "low_52w":       round(float(info.get("fiftyTwoWeekLow", 0)), 2),
+                "high_52w":      high_52w,
+                "low_52w":       low_52w,
                 "history": [
                     {
                         "date":   str(idx.date()),
@@ -47,10 +54,7 @@ def get_stock_data(ticker: str, period: str = "3mo"):
                 ],
             }
     except Exception as e:
-        import traceback
-        print(f"  ⚠️  yfinance 실패 상세: {traceback.format_exc()}", flush=True)
-        print(f"  ⚠️  yfinance 에러 타입: {type(e).__name__}: {e}", flush=True)
-
+        print(f"  ⚠️  yfinance 실패: {e} → Alpha Vantage 시도")
     # ── 2차: Alpha Vantage 폴백 ───────────────────────────────────
     av_key = os.getenv("ALPHA_VANTAGE_KEY")
     if not av_key:
