@@ -145,9 +145,14 @@ def analyze(req: AnalyzeRequest):
 
 
 def stream_response():
+    def stream_response():
+        print(f"  🟢 stream_response 시작", flush=True)
         # 1. 수집 데이터 전송
-        yield f"data: {json.dumps({'type': 'data', 'payload': data}, ensure_ascii=False)}\n\n"
-
+        data_json = json.dumps({'type': 'data', 'payload': data}, ensure_ascii=False)
+        print(f"  🟢 data 전송 크기: {len(data_json)} bytes", flush=True)
+        yield f"data: {data_json}\n\n"
+        print(f"  🟢 data 전송 완료", flush=True)
+        
         # 2. AI 분석 스트리밍
         full_text = []
         for token in analyze_stream(data):

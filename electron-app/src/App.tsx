@@ -344,7 +344,7 @@ export default function App() {
       }
 
       if (!receivedData) throw new Error("서버에서 데이터를 받지 못했어요.");
-      setAppState("done");
+      if (appState !== "done") setAppState("done");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했어요.";
       setError(msg);
