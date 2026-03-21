@@ -14,6 +14,9 @@ def get_stock_data(ticker: str, period: str = "3mo"):
 
     # ── 1차: yfinance ─────────────────────────────────────────────
     try:
+        print(f"  🔍 yfinance 시도: {ticker}", flush=True)
+        import yfinance as yf
+        print(f"  🔍 yfinance 버전: {yf.__version__}", flush=True)
         stock = yf.Ticker(ticker)
         hist  = stock.history(period=period)
         info  = stock.info
@@ -44,7 +47,9 @@ def get_stock_data(ticker: str, period: str = "3mo"):
                 ],
             }
     except Exception as e:
-        print(f"  ⚠️  yfinance 실패: {e} → Alpha Vantage 시도")
+        import traceback
+        print(f"  ⚠️  yfinance 실패 상세: {traceback.format_exc()}", flush=True)
+        print(f"  ⚠️  yfinance 에러 타입: {type(e).__name__}: {e}", flush=True)
 
     # ── 2차: Alpha Vantage 폴백 ───────────────────────────────────
     av_key = os.getenv("ALPHA_VANTAGE_KEY")
@@ -70,6 +75,8 @@ def get_stock_data(ticker: str, period: str = "3mo"):
         resp = requests.get(url, params=params, timeout=15)
         data = resp.json()
 
+        print(f"  🔍 Alpha Vantage 응답: {json.dumps(data)[:300]}", flush=True)
+        
         ts = data.get("Time Series (Daily)", {})
         if not ts:
             # 글로벌 쿼터 에러 확인
