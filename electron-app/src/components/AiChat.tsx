@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { MessageCircle, X, Send, Loader, Bot, User, Minimize2 } from "lucide-react";
 import type { StockData } from "../App";
 
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -56,7 +58,7 @@ export default function AiChat({ stockData, analysisText, isAnalysisDone }: Prop
     setMessages(prev => [...prev, { role: "assistant", content: "", streaming: true }]);
 
     try {
-      const response = await fetch("http://localhost:8000/chat", {
+      const response = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
