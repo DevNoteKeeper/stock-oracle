@@ -125,7 +125,6 @@ def analyze(req: AnalyzeRequest):
 
     data = collect_all(req.ticker, req.company_name, req.country)
 
-    # 디버그: 각 항목 에러 확인
     print(f"  stock error: {data.get('stock', {}).get('error')}")
     print(f"  financials error: {data.get('financials', {}).get('reason')}")
     print(f"  technicals error: {data.get('technicals', {}).get('reason')}")
@@ -137,23 +136,18 @@ def analyze(req: AnalyzeRequest):
             raise HTTPException(status_code=503, detail=err_msg)
         raise HTTPException(status_code=400, detail=err_msg)
 
-    # 포지션 계산 후 data에 추가
     pos = _calc_position(req, float(data["stock"].get("current_price", 0)))
     if pos:
         data["position"] = pos
     data["period"] = req.period
 
-
-def stream_response():
     def stream_response():
         print(f"  🟢 stream_response 시작", flush=True)
-        # 1. 수집 데이터 전송
         data_json = json.dumps({'type': 'data', 'payload': data}, ensure_ascii=False)
         print(f"  🟢 data 전송 크기: {len(data_json)} bytes", flush=True)
         yield f"data: {data_json}\n\n"
         print(f"  🟢 data 전송 완료", flush=True)
-        
-        # 2. AI 분석 스트리밍
+
         full_text = []
         for token in analyze_stream(data):
             if token.startswith("❌"):
@@ -163,7 +157,6 @@ def stream_response():
             full_text.append(token)
             yield f"data: {json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
 
-        # 3. 예측 파싱 & 자동 저장
         try:
             analysis = "".join(full_text)
             pred = _parse_prediction(analysis, data)
@@ -186,11 +179,12 @@ def stream_response():
             pass
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        return StreamingResponse(
-            stream_response(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+
+    return StreamingResponse(
+        stream_response(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _parse_prediction(text: str, data: dict) -> dict | None:

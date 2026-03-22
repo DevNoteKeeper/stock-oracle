@@ -285,72 +285,76 @@ export default function App() {
     check();
   }, []);
 
-  const handleAnalyze = async (ticker: string, companyName: string, country: string, position?: PositionInfo, period?: string) => {
-    setAppState("analyzing");
-    setStockData(null);
-    setAnalysisText("");
-    setError("");
+const handleAnalyze = async (ticker: string, companyName: string, country: string, position?: PositionInfo, period?: string) => {
+  setAppState("analyzing");
+  setStockData(null);
+  setAnalysisText("");
+  setError("");
 
-    try {
-      const response = await fetch(`${API_BASE}/analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker, company_name: companyName, country, position, period: period || "tomorrow" }),
-      });
+  try {
+    const response = await fetch(`${API_BASE}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ ticker, company_name: companyName, country, position, period: period || "tomorrow" }),
+    });
 
-      if (!response.ok) {
-        let detail = "분석 중 오류가 발생했어요.";
+    if (!response.ok) {
+      let detail = "분석 중 오류가 발생했어요.";
+      try {
+        const err = await response.json();
+        detail = err.detail || detail;
+      } catch {}
+      throw new Error(detail);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let receivedData = false;
+    let isDone = false;
+
+    while (!isDone) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr) continue;
         try {
-          const err = await response.json();
-          detail = err.detail || detail;
-        } catch {}
-        throw new Error(detail);
-      }
-
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let receivedData = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-          try {
-            const msg = JSON.parse(jsonStr);
-            if (msg.type === "data") {
-              setStockData(msg.payload);
-              receivedData = true;
-            } else if (msg.type === "token") {
-              setAnalysisText((prev) => prev + msg.payload);
-            } else if (msg.type === "prediction_saved") {
-              // 예측 저장 확인 — 필요 시 UI 업데이트 가능
-              console.log("예측 저장됨:", msg.payload);
-            } else if (msg.type === "done") {
-              setAppState("done");
-            }
-          } catch {
-            // 파싱 실패 무시
+          const msg = JSON.parse(jsonStr);
+          if (msg.type === "data") {
+            setStockData(msg.payload);
+            receivedData = true;
+          } else if (msg.type === "token") {
+            setAnalysisText((prev) => prev + msg.payload);
+          } else if (msg.type === "prediction_saved") {
+            console.log("예측 저장됨:", msg.payload);
+          } else if (msg.type === "error") {
+            console.error("서버 에러:", msg.payload);
+          } else if (msg.type === "done") {
+            isDone = true;
+            setAppState("done");
           }
+        } catch {
+          // 파싱 실패 무시
         }
       }
-
-      if (!receivedData) throw new Error("서버에서 데이터를 받지 못했어요.");
-      setAppState("done");
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했어요.";
-      setError(msg);
-      setAppState("input");
     }
-  };
+
+    if (!receivedData) throw new Error("서버에서 데이터를 받지 못했어요.");
+    if (!isDone) setAppState("done");
+
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "알 수 없는 오류가 발생했어요.";
+    setError(msg);
+    setAppState("input");
+  }
+};
 
   const handleReset = () => {
     setAppState("input");
