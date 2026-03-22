@@ -442,6 +442,12 @@ def chat(req: ChatRequest):
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
+    return StreamingResponse(
+        stream_chat(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
