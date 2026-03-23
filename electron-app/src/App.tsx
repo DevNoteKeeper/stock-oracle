@@ -459,45 +459,6 @@ const handleAnalyze = async (ticker: string, companyName: string, country: strin
               ← 새 분석
             </button>
           )}
-
-          {/* Windows/Linux 창 컨트롤 — macOS는 네이티브 버튼 사용 */}
-          {!isMac && (
-            <div className="flex items-center h-full">
-              {/* 최소화 */}
-              <WinButton
-                onClick={() => window.electronAPI?.windowMinimize?.()}
-                hoverBg="rgba(255,255,255,0.08)"
-                title="최소화"
-              >
-                <svg width="10" height="1" viewBox="0 0 10 1">
-                  <rect width="10" height="1" fill="currentColor" />
-                </svg>
-              </WinButton>
-              {/* 최대화 */}
-              <WinButton
-                onClick={() => window.electronAPI?.windowMaximize?.()}
-                hoverBg="rgba(255,255,255,0.08)"
-                title="최대화"
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                  <rect x="0.5" y="0.5" width="9" height="9" rx="0.5" stroke="currentColor" />
-                </svg>
-              </WinButton>
-              {/* 닫기 */}
-              <WinButton
-                onClick={() => window.electronAPI?.windowClose?.()}
-                hoverBg="#e81123"
-                hoverColor="white"
-                title="닫기"
-                isClose
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10">
-                  <line x1="0" y1="0" x2="10" y2="10" stroke="currentColor" strokeWidth="1.2" />
-                  <line x1="10" y1="0" x2="0" y2="10" stroke="currentColor" strokeWidth="1.2" />
-                </svg>
-              </WinButton>
-            </div>
-          )}
         </div>
       </header>
 
