@@ -3,6 +3,7 @@
 > 환율 · 유가 · 선물 · 외국인/기관 수급 · 뉴스를 종합 분석해 내일/1주일/1개월 주가를 예측하는 AI 분석 앱
 
 🌐 **라이브 데모**: [https://stock-oracle-opal.vercel.app/](https://stock-oracle-opal.vercel.app/)
+🚀 **배포**: Vercel (프론트엔드) · Render (백엔드)
 
 > ⚠️ Render 무료 플랜은 비활성 시 슬립 상태가 됩니다. 첫 요청 시 50초가 걸릴 수 있어요.
 
