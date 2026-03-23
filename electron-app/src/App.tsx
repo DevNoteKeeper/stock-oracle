@@ -215,48 +215,6 @@ declare global {
 
 const isMac = window.electronAPI?.platform === "darwin";
 
-// Windows 스타일 창 컨트롤 버튼
-function WinButton({
-  children, onClick, hoverBg, hoverColor = "var(--text-primary)", title, isClose = false,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  hoverBg: string;
-  hoverColor?: string;
-  title: string;
-  isClose?: boolean;
-}) {
-  return (
-    <button
-      title={title}
-      onClick={onClick}
-      style={{
-        width: isClose ? 46 : 46,
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "transparent",
-        border: "none",
-        color: "var(--text-muted)",
-        cursor: "pointer",
-        transition: "background 0.12s, color 0.12s",
-        outline: "none",
-        WebkitAppRegion: "no-drag",
-      } as React.CSSProperties}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = hoverBg;
-        e.currentTarget.style.color = hoverColor;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-        e.currentTarget.style.color = "var(--text-muted)";
-      }}
-    >
-      {children}
-    </button>
-  );
-}
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>("input");
