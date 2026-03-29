@@ -157,6 +157,7 @@ def analyze(req: AnalyzeRequest):
             full_text.append(token)
             yield f"data: {json.dumps({'type': 'token', 'payload': token}, ensure_ascii=False)}\n\n"
 
+        # 3. 예측 파싱 & 자동 저장
         try:
             analysis = "".join(full_text)
             pred = _parse_prediction(analysis, data)
@@ -175,6 +176,22 @@ def analyze(req: AnalyzeRequest):
                     analysis_date        = today,
                 )
                 yield f"data: {json.dumps({'type': 'prediction_saved', 'payload': pred}, ensure_ascii=False)}\n\n"
+
+                # Firebase 저장 (배포 사이트 연동)
+                try:
+                    from firebase_memory import get_memory
+                    mem = get_memory()
+                    if mem.enabled:
+                        mem.save_prediction_record(req.ticker, {
+                            "as_of":      today,
+                            "base_price": cur,
+                            "pred":       pred,
+                            "eval":       None,  # 아직 검증 전
+                        })
+                        print(f"  🧠 Firebase: 예측 저장 완료 ({req.ticker})")
+                except Exception as e:
+                    print(f"  ⚠️  Firebase 저장 실패 (무시): {e}")
+
         except Exception:
             pass
 

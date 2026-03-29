@@ -985,6 +985,16 @@ def save_prediction(ticker, company_name, predicted_direction,
 
 def verify_predictions(ticker=None):
     try:
+        # Firebase 메모리 초기화
+        mem = None
+        try:
+            from firebase_memory import get_memory
+            mem = get_memory()
+            if not mem.enabled:
+                mem = None
+        except Exception:
+            pass
+
         log = _load_log()
         updated = 0
         for entry in log:
@@ -997,11 +1007,32 @@ def verify_predictions(ticker=None):
                 target_dt = dt.strptime(analysis_date, "%Y-%m-%d") + td(days=1)
                 while target_dt.weekday() >= 5: target_dt += td(days=1)
                 if target_dt.date() > dt.now().date(): continue
-                t    = yf.Ticker(entry["ticker"])
-                end_dt = target_dt + td(days=4)
-                hist = t.history(start=target_dt.strftime("%Y-%m-%d"), end=end_dt.strftime("%Y-%m-%d"))
-                if hist.empty: continue
-                actual_price = round(float(hist.iloc[0]["Close"]), 2)
+
+                target_date_str = target_dt.strftime("%Y-%m-%d")
+                actual_price = None
+
+                # 1. Firebase 캐시 확인
+                if mem:
+                    actual_price = mem.get_actual_price(entry["ticker"], target_date_str)
+                    if actual_price:
+                        print(f"  🧠 Firebase 캐시 히트: {entry['ticker']} {target_date_str} → {actual_price}")
+
+                # 2. Firebase에 없으면 yfinance로 조회
+                if not actual_price:
+                    t    = yf.Ticker(entry["ticker"])
+                    end_dt = target_dt + td(days=4)
+                    hist = t.history(
+                        start=target_dt.strftime("%Y-%m-%d"),
+                        end=end_dt.strftime("%Y-%m-%d")
+                    )
+                    if hist.empty: continue
+                    actual_price = round(float(hist.iloc[0]["Close"]), 2)
+
+                    # Firebase에 캐싱
+                    if mem:
+                        mem.save_actual_price(entry["ticker"], target_date_str, actual_price)
+                        print(f"  🧠 Firebase 캐시 저장: {entry['ticker']} {target_date_str} → {actual_price}")
+
                 base_price   = entry["current_price"]
                 actual_pct   = round((actual_price - base_price) / base_price * 100, 2)
                 actual_dir   = "상승" if actual_pct > 0.3 else "하락" if actual_pct < -0.3 else "보합"
@@ -1015,12 +1046,14 @@ def verify_predictions(ticker=None):
                 })
                 updated += 1
             except Exception: continue
+
         if updated > 0:
-            PREDICTION_LOG.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+            PREDICTION_LOG.write_text(
+                json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         return {"updated": updated, "total": len(log)}
     except Exception as e:
         return {"error": str(e)}
-
 
 def get_prediction_stats(ticker=None):
     try:

@@ -463,3 +463,39 @@ if __name__ == "__main__":
             print("✅ user_id 초기화 완료. 다음 실행 시 새 ID가 발급됩니다.")
         else:
             print("user_id 파일이 없습니다.")
+            
+def save_actual_price(self, ticker: str, date: str, actual_price: float) -> bool:
+    """실제 주가를 Firebase에 캐싱"""
+    if not self.enabled:
+        return False
+    try:
+        (
+            self.db.collection("actual_prices")
+            .document(f"{ticker}_{date.replace('-', '')}")
+            .set({
+                "ticker":       ticker,
+                "date":         date,
+                "actual_price": actual_price,
+                "saved_at":     datetime.now().isoformat(),
+            })
+        )
+        return True
+    except Exception as e:
+        print(f"  ⚠️  실제가 캐시 저장 실패: {e}")
+        return False
+
+def get_actual_price(self, ticker: str, date: str) -> float | None:
+    """Firebase에서 실제 주가 캐시 조회"""
+    if not self.enabled:
+        return None
+    try:
+        doc = (
+            self.db.collection("actual_prices")
+            .document(f"{ticker}_{date.replace('-', '')}")
+            .get()
+        )
+        if doc.exists:
+            return doc.to_dict().get("actual_price")
+        return None
+    except Exception:
+        return None
