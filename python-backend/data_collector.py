@@ -787,6 +787,8 @@ def get_news(query: str, company_name: str = "", country: str = "한국", days: 
             ("South Korea KOSPI Samsung foreign investors sell buy", "한국/외국인"),
             ("US China tariff trade semiconductor chips export ban", "무역/관세"),
             ("Trump tariff policy executive order trade war", "트럼프"),
+            ("Trump Iran deal ceasefire military strike diplomacy", "트럼프/외교"),
+            ("Trump speech statement market reaction stocks", "트럼프/발언"),
         ]
 
         # ── Groq 동적 쿼리 생성 ──────────────────────────────────
@@ -795,7 +797,9 @@ def get_news(query: str, company_name: str = "", country: str = "한국", days: 
             f"- KOSPI: {indicators.get('kospi', {}).get('price')}\n"
             f"- USD/KRW: {indicators.get('usd_krw', {}).get('price')}\n"
             f"Generate 3-5 short English news search queries about current global events "
-            f"affecting {en_company} stock. Return ONLY a JSON array of strings."
+            f"affecting {en_company} stock. Focus on: Trump statements, geopolitical risks, "
+            f"Fed policy, trade war, oil prices. "
+            f"Return ONLY a JSON array of strings."
         )
         dynamic_queries = []
         try:
