@@ -431,10 +431,10 @@ const handleAnalyze = async (ticker: string, companyName: string, country: strin
             >
               <span>⚠️</span>
               <div>
-                <p className="font-medium">백엔드 서버에 연결할 수 없어요</p>
-                <p className="mt-0.5" style={{ color: "rgba(252,165,165,0.7)", fontSize: 12 }}>
+                <p className="font-medium">50초 후 다시 시도해주세요</p>
+                {/* <p className="mt-0.5" style={{ color: "rgba(252,165,165,0.7)", fontSize: 12 }}>
                   터미널에서 <code style={{ fontFamily: "var(--font-mono)" }}>uvicorn main:app --reload</code> 를 실행해주세요.
-                </p>
+                </p> */}
               </div>
             </div>
           )}

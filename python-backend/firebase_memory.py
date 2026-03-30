@@ -200,40 +200,39 @@ class FirebaseMemory:
 
     # ── 예측 기록 저장 ────────────────────────────────────────────────
 
-    def save_prediction_record(self, ticker: str, result: dict) -> bool:
-        """모든 예측 결과(맞든 틀리든)를 사용자 전용 경로에 기록"""
-        if not self.enabled or not result.get("eval"):
-            return False
-        try:
-            pred = result["pred"]
-            ev   = result["eval"]
-            (
-                self._user_ref()
-                .collection("prediction_history")
-                .document(ticker)
-                .collection("records")
-                .document(result["as_of"])
-                .set({
-                    "date":             result["as_of"],
-                    "user_id":          self.user_id,
-                    "ticker":           ticker,
-                    "base_price":       result["base_price"],
-                    "pred_direction":   pred["direction"],
-                    "pred_pct_low":     pred["pct_low"],
-                    "pred_pct_high":    pred["pct_high"],
-                    "actual_direction": ev["actual_dir"],
-                    "actual_pct":       ev["actual_pct"],
-                    "hit":              ev["hit"],
-                    "in_range":         ev["in_range"],
-                    "override":         result.get("override_reason"),
-                    "created_at":       datetime.now().isoformat(),
-                })
-            )
-            return True
-        except Exception as e:
-            print(f"  ⚠️  Firebase 기록 저장 실패: {e}")
-            return False
-
+def save_prediction_record(self, ticker: str, result: dict) -> bool:
+    if not self.enabled:
+        return False
+    # eval이 None이어도 저장 허용 (배포 사이트에서 예측 직후 저장 시)
+    try:
+        pred = result.get("pred", {})
+        ev   = result.get("eval")  # None 허용
+        (
+            self._user_ref()
+            .collection("prediction_history")
+            .document(ticker)
+            .collection("records")
+            .document(result["as_of"])
+            .set({
+                "date":             result["as_of"],
+                "user_id":          self.user_id,
+                "ticker":           ticker,
+                "base_price":       result.get("base_price", 0),
+                "pred_direction":   pred.get("direction"),
+                "pred_pct_low":     pred.get("pct_low"),
+                "pred_pct_high":    pred.get("pct_high"),
+                "actual_direction": ev["actual_dir"]  if ev else None,
+                "actual_pct":       ev["actual_pct"]  if ev else None,
+                "hit":              ev["hit"]          if ev else None,
+                "in_range":         ev["in_range"]     if ev else None,
+                "override":         result.get("override_reason"),
+                "created_at":       datetime.now().isoformat(),
+            })
+        )
+        return True
+    except Exception as e:
+        print(f"  ⚠️  Firebase 기록 저장 실패: {e}")
+        return False
     # ── 패턴 조회 ─────────────────────────────────────────────────────
 
     def get_patterns(self, ticker: str, limit: int = 20) -> list[dict]:
